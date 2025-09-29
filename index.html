@@ -16,8 +16,6 @@
   #log { max-height: 200px; overflow-y: auto; background: #222; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; margin-top: 10px; }
   #progressContainer { width: 100%; background: #ddd; height: 20px; border-radius: 10px; margin-top: 10px; display: none; }
   #progressBar { width: 0%; height: 100%; background: #1DB954; border-radius: 10px; transition: width 0.2s; }
-  #tokenHelper { background: #555; }
-  #tokenHelper:hover { background: #444; }
 </style>
 </head>
 <body>
@@ -29,11 +27,6 @@
 <label>Spotify Playlist Name:</label>
 <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
 
-<label>Spotify Access Token:</label>
-<input type="text" id="spotifyTokenInput" placeholder="Paste token here">
-
-<button id="setToken">Set Spotify Token</button>
-<button id="tokenHelper">Get New Token</button>
 <button id="fetchApple">Fetch Apple Tracks</button>
 <button id="transfer" disabled>Transfer Selected Tracks</button>
 
@@ -49,46 +42,52 @@
 <script src="https://cdn.jsdelivr.net/npm/spotify-web-api-js@1.5.2/src/spotify-web-api.min.js"></script>
 
 <script>
-window.onload = () => {
+window.onload = async () => {
+  const SPOTIFY_CLIENT_ID = "YOUR_CLIENT_ID"; // <-- replace with your Spotify Developer app client_id
+  const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/";
+  const SCOPES = "playlist-modify-public playlist-modify-private user-read-private";
+
   const spotifyApi = new SpotifyWebApi();
   const logEl = document.getElementById("log");
   const progressContainer = document.getElementById("progressContainer");
   const progressBar = document.getElementById("progressBar");
+  const fetchAppleBtn = document.getElementById("fetchApple");
+  const transferBtn = document.getElementById("transfer");
 
-  const log = msg => {
-    logEl.textContent += msg + "\n";
-    logEl.scrollTop = logEl.scrollHeight;
-  };
-
+  const log = msg => { logEl.textContent += msg + "\n"; logEl.scrollTop = logEl.scrollHeight; };
   let appleTracks = [];
   let spotifyUserId = null;
 
-  // Token helper
-  document.getElementById("tokenHelper").onclick = () => {
-    window.open(
-      "https://developer.spotify.com/console/get-current-user/?scope=playlist-modify-public%20playlist-modify-private%20user-read-private",
-      "_blank"
-    );
-  };
+  // ---- Implicit Grant Flow ----
+  function getHashParams() {
+    const hash = window.location.hash.substring(1);
+    const params = {};
+    hash.split("&").forEach(kv => { const [key, val] = kv.split("="); params[key] = decodeURIComponent(val); });
+    return params;
+  }
 
-  // Set Spotify token manually
-  document.getElementById("setToken").onclick = async () => {
-    const token = document.getElementById("spotifyTokenInput").value.trim();
-    if (!token) { log("❌ Enter a Spotify token"); return; }
-    spotifyApi.setAccessToken(token);
-    try {
-      const me = await spotifyApi.getMe();
-      if (!me.id) throw new Error("No user ID returned");
-      spotifyUserId = me.id;
-      log("✅ Spotify logged in as: " + spotifyUserId);
-    } catch (e) {
-      log("❌ Failed to get Spotify user. Token may be invalid/expired.");
-      spotifyUserId = null;
+  async function handleAuth() {
+    const params = getHashParams();
+    if (params.access_token) {
+      spotifyApi.setAccessToken(params.access_token);
+      try {
+        const me = await spotifyApi.getMe();
+        spotifyUserId = me.id;
+        log("✅ Spotify logged in as: " + spotifyUserId);
+      } catch (e) {
+        log("❌ Failed to get Spotify user: " + e.message);
+      }
+    } else {
+      // redirect to Spotify auth page
+      const authUrl = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
+      window.location = authUrl;
     }
-  };
+  }
 
-  // Fetch Apple Music tracks
-  document.getElementById("fetchApple").onclick = async () => {
+  await handleAuth();
+
+  // ---- Fetch Apple Tracks ----
+  fetchAppleBtn.onclick = async () => {
     const appleUrl = document.getElementById("appleUrl").value.trim();
     if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
@@ -120,16 +119,16 @@ window.onload = () => {
         trackListDiv.appendChild(div);
       });
 
-      document.getElementById("transfer").disabled = false;
+      transferBtn.disabled = false;
     } catch(e) {
       log("❌ Error fetching Apple Music playlist: " + e.message);
     }
   };
 
-  // Transfer selected tracks to Spotify
-  document.getElementById("transfer").onclick = async () => {
-    if (!spotifyUserId) { log("❌ Set a valid Spotify token first"); return; }
-    const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
+  // ---- Transfer Tracks to Spotify ----
+  transferBtn.onclick = async () => {
+    if (!spotifyUserId) { log("❌ Spotify not logged in"); return; }
+    const selectedTracks = appleTracks.filter((t,i)=>document.getElementById(`track${i}`).checked);
     if (!selectedTracks.length) { log("❌ No tracks selected"); return; }
 
     const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
@@ -145,23 +144,18 @@ window.onload = () => {
       for (let i = 0; i < selectedTracks.length; i++) {
         const t = selectedTracks[i];
         const res = await spotifyApi.searchTracks(`${t.name} ${t.artist}`, { limit: 1 });
-        if (res.tracks.items.length) {
-          uris.push(res.tracks.items[0].uri);
-          log("Matched: " + t.name);
-        } else {
-          log("Not found: " + t.name);
-        }
+        if (res.tracks.items.length) uris.push(res.tracks.items[0].uri);
+        log(res.tracks.items.length ? "Matched: " + t.name : "Not found: " + t.name);
         progressBar.style.width = `${Math.round((i+1)/selectedTracks.length*100)}%`;
       }
 
-      for (let i = 0; i < uris.length; i += 100) {
-        const chunk = uris.slice(i, i + 100);
-        await spotifyApi.addTracksToPlaylist(newPlaylist.id, chunk);
+      for (let i = 0; i < uris.length; i+=100) {
+        await spotifyApi.addTracksToPlaylist(newPlaylist.id, uris.slice(i,i+100));
       }
 
       log("🎉 Transfer complete!");
       progressBar.style.width = "100%";
-    } catch (e) {
+    } catch(e) {
       log("❌ Error: " + e.message);
     }
   };
