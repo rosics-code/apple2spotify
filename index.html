@@ -133,14 +133,14 @@ window.onload = () => {
   }
 };
 
-// Fetch Apple Music tracks - CORS PROXY **FINALLY** CORRECTED
+// Fetch Apple Music tracks - NEW REGEX FOR SHOEBOX
 document.getElementById("fetchApple").onclick = async () => {
     const appleUrl = document.getElementById("appleUrl").value.trim();
     if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
     log("🔄 Bypassing CORS with corsproxy.io...");
 
-    // 🌟 THE FINAL FIX: Using the correct, absolute URL for the proxy
+    // FINAL FIX: Using the correct, absolute URL for the proxy
     const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(appleUrl)}`;
 
     try {
@@ -154,8 +154,10 @@ document.getElementById("fetchApple").onclick = async () => {
             throw new Error(`Proxy status: ${proxyResp.status} - ${text}`);
         }
 
-        const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
-        if (!jsonMatch) { 
+        // 🌟 THE UPDATE: Using a looser regex to find the shoebox-store script content
+        const jsonMatch = text.match(/<script[^>]*id="shoebox-store"[^>]*>([^<]+)<\/script>/);
+        
+        if (!jsonMatch || !jsonMatch[1]) { 
             log("❌ Playlist JSON not found. Are you sure the URL is public and correct?"); 
             return; 
         }
@@ -228,7 +230,7 @@ document.getElementById("transfer").onclick = async () => {
     // FIXED ENDPOINT: Use the real Spotify search endpoint
     for (const t of selectedTracks) {
       const query = encodeURIComponent(`${t.name} ${t.artist}`);
-      const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: `Bearer ${spotifyToken}` } });
+      const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: "Bearer " + spotifyToken } });
       const data = await searchResp.json();
       if (data.tracks.items.length) {
         uris.push(data.tracks.items[0].uri);
