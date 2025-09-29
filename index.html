@@ -2,9 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Apple2Spotify - Hybrid Auth</title>
+<title>Apple2Spotify - Hybrid Auth (New Client ID)</title>
 <style>
-/* ... (Existing CSS remains the same) ... */
+/* ... (CSS remains the same) ... */
 body { font-family: "Segoe UI", sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f0f2f5; }
 h1 { text-align: center; color: #1DB954; text-shadow: 1px 1px #00000022; }
 label { display: block; margin: 10px 0 5px; font-weight: bold; color: #333; }
@@ -62,14 +62,14 @@ button:hover { background: #17a44c; }
 
 <script>
 window.onload = async () => {
-  // ⚠️ ACTION REQUIRED: Replace with your actual Spotify Client ID
-  const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137"; 
+  // 💥 NEW CLIENT ID: a1d76286f77e4427896b0ee7f5360595
+  const SPOTIFY_CLIENT_ID = "a1d76286f77e4427896b0ee7f5360595"; 
   
-  // ⚠️ ACTION REQUIRED: This MUST exactly match the URL registered in your Spotify App settings.
+  // 💯 CONFIRMED REDIRECT URI: Check that this is exactly what's in the new Spotify app's settings!
   const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html"; 
   
   const SCOPES = "playlist-modify-public playlist-modify-private user-read-private";
-  const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'; // Using the official endpoint
+  const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'; 
 
   const spotifyApi = new SpotifyWebApi();
   const logEl = document.getElementById("log");
@@ -92,11 +92,10 @@ window.onload = async () => {
       statusEl.textContent = message;
       statusEl.className = loggedIn ? "status-logged-in" : "status-logged-out";
       transferBtn.disabled = !loggedIn;
-      // Also enable the manual set button to allow quick testing/re-login
       document.getElementById("setToken").disabled = false; 
   };
   
-  // --- PKCE Utility Functions (Required for the auto-auth and refresh parts) ---
+  // --- PKCE Utility Functions ---
 
   const generateRandomString = (length) => {
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -157,6 +156,7 @@ window.onload = async () => {
 
       if (!response.ok) {
         const errorData = await response.json();
+        // This is where the INVALID_CLIENT error is thrown.
         log(`❌ PKCE Exchange Failed: ${errorData.error_description || errorData.error}`);
         throw new Error(`Token exchange failed. Error: ${errorData.error || response.status}`);
       }
@@ -238,7 +238,6 @@ window.onload = async () => {
     if (code) {
       log("✅ Spotify redirect detected. Exchanging code for token...");
       token = await exchangeCodeForToken(code);
-      // Clean up the URL query parameters
       window.history.replaceState(null, '', REDIRECT_URI); 
     } 
     
@@ -252,7 +251,7 @@ window.onload = async () => {
         await validateTokenAndSetUser(token);
     } else {
         setAuthStatus(false, "Spotify: Authorization needed (Click 'Fetch' or paste token)");
-        tokenInputEl.value = ""; // Clear if unauthorized
+        tokenInputEl.value = "";
     }
   };
   
