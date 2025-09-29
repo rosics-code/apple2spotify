@@ -4,45 +4,57 @@
 <meta charset="UTF-8">
 <title>Apple2Spotify</title>
 <style>
-  body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }
-  h1 { text-align: center; }
-  input[type=text] { width: 100%; padding: 8px; margin: 5px 0; }
-  button { padding: 10px 15px; margin: 5px 0; }
-  #trackList { max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-top: 10px; }
+  body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f2f2f2; }
+  h1 { text-align: center; color: #1DB954; }
+  label { display: block; margin: 10px 0 5px; font-weight: bold; }
+  input[type=text] { width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; }
+  button { padding: 10px 15px; margin: 5px 5px 15px 0; background: #1DB954; color: white; border: none; border-radius: 5px; cursor: pointer; }
+  button:hover { background: #17a44c; }
+  #trackList { max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; border-radius: 5px; background: white; }
   .track { display: flex; align-items: center; margin-bottom: 5px; }
   .track label { flex: 1; cursor: pointer; }
+  #log { max-height: 200px; overflow-y: auto; background: #222; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; margin-top: 10px; }
+  #progressContainer { width: 100%; background: #ddd; height: 20px; border-radius: 10px; margin-top: 10px; display: none; }
+  #progressBar { width: 0%; height: 100%; background: #1DB954; border-radius: 10px; }
 </style>
 </head>
 <body>
 <h1>Apple Music → Spotify Transfer</h1>
 
-<label>
-  Apple Music Public Playlist URL:
-  <input type="text" id="appleUrl" placeholder="https://music.apple.com/...">
-</label>
+<label>Apple Music Public Playlist URL:</label>
+<input type="text" id="appleUrl" placeholder="https://music.apple.com/...">
 
-<label>
-  Spotify Playlist Name:
-  <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
-</label>
+<label>Spotify Playlist Name:</label>
+<input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
 
-<label>
-  Spotify Access Token:
-  <input type="text" id="spotifyTokenInput" placeholder="Paste token here">
-</label>
+<label>Spotify Access Token:</label>
+<input type="text" id="spotifyTokenInput" placeholder="Paste token here">
 
 <button id="setToken">Set Spotify Token</button>
 <button id="fetchApple">Fetch Apple Tracks</button>
 <button id="transfer" disabled>Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
+
+<div id="progressContainer">
+  <div id="progressBar"></div>
+</div>
+
 <pre id="log"></pre>
 
-<!-- Spotify Web API JS -->
+<!-- Spotify Web API JS library -->
 <script src="https://cdn.jsdelivr.net/npm/spotify-web-api-js@1.5.2/dist/spotify-web-api.min.js"></script>
+
 <script>
 const spotifyApi = new SpotifyWebApi();
-const log = msg => document.getElementById("log").textContent += msg + "\n";
+const logEl = document.getElementById("log");
+const progressContainer = document.getElementById("progressContainer");
+const progressBar = document.getElementById("progressBar");
+
+const log = msg => {
+  logEl.textContent += msg + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+};
 
 let appleTracks = [];
 let spotifyUserId = null;
@@ -55,9 +67,9 @@ document.getElementById("setToken").onclick = async () => {
   try {
     const me = await spotifyApi.getMe();
     spotifyUserId = me.id;
-    log("Spotify logged in as: " + spotifyUserId);
+    log("✅ Spotify logged in as: " + spotifyUserId);
   } catch (e) {
-    log("Failed to get Spotify user: " + e.message);
+    log("❌ Failed to get Spotify user: " + e.message);
   }
 };
 
@@ -67,51 +79,60 @@ document.getElementById("fetchApple").onclick = async () => {
   if (!appleUrl) { log("Enter Apple Music URL"); return; }
 
   log("Fetching Apple Music playlist...");
-  const resp = await fetch(appleUrl);
-  const text = await resp.text();
-  const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
-  if (!jsonMatch) { log("Playlist JSON not found"); return; }
+  try {
+    const resp = await fetch(appleUrl);
+    const text = await resp.text();
+    const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
+    if (!jsonMatch) { log("❌ Playlist JSON not found"); return; }
 
-  const jsonData = JSON.parse(jsonMatch[1]);
-  appleTracks = [];
-  for (const key in jsonData) {
-    const items = jsonData[key].data;
-    if (!items) continue;
-    items.forEach(item => {
-      if (item.type === "songs") appleTracks.push({ name: item.attributes.name, artist: item.attributes.artistName });
+    const jsonData = JSON.parse(jsonMatch[1]);
+    appleTracks = [];
+    for (const key in jsonData) {
+      const items = jsonData[key].data;
+      if (!items) continue;
+      items.forEach(item => {
+        if (item.type === "songs") appleTracks.push({ name: item.attributes.name, artist: item.attributes.artistName });
+      });
+    }
+
+    log(`✅ Found ${appleTracks.length} tracks`);
+
+    // Display tracks with checkboxes
+    const trackListDiv = document.getElementById("trackList");
+    trackListDiv.innerHTML = "";
+    appleTracks.forEach((t, i) => {
+      const div = document.createElement("div");
+      div.className = "track";
+      div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
+      trackListDiv.appendChild(div);
     });
+
+    document.getElementById("transfer").disabled = false;
+  } catch(e) {
+    log("❌ Error fetching Apple Music playlist: " + e.message);
   }
-  log(`Found ${appleTracks.length} tracks`);
-
-  // display tracks with checkboxes
-  const trackListDiv = document.getElementById("trackList");
-  trackListDiv.innerHTML = "";
-  appleTracks.forEach((t, i) => {
-    const div = document.createElement("div");
-    div.className = "track";
-    div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
-    trackListDiv.appendChild(div);
-  });
-
-  document.getElementById("transfer").disabled = false;
 };
 
 // Transfer selected tracks to Spotify
 document.getElementById("transfer").onclick = async () => {
-  if (!spotifyUserId) { log("Set Spotify token first"); return; }
+  if (!spotifyUserId) { log("❌ Set Spotify token first"); return; }
   const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
-  if (!selectedTracks.length) { log("No tracks selected"); return; }
+  if (!selectedTracks.length) { log("❌ No tracks selected"); return; }
 
   const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
   try {
     // create playlist
     const newPlaylist = await spotifyApi.createPlaylist(spotifyUserId, { name: playlistName, public: false });
-    log("Created Spotify playlist: " + newPlaylist.name);
+    log("✅ Created Spotify playlist: " + newPlaylist.name);
+
+    progressContainer.style.display = "block";
+    progressBar.style.width = "0%";
 
     // search & add tracks
     const uris = [];
-    for (const t of selectedTracks) {
+    for (let i = 0; i < selectedTracks.length; i++) {
+      const t = selectedTracks[i];
       const res = await spotifyApi.searchTracks(`${t.name} ${t.artist}`, { limit: 1 });
       if (res.tracks.items.length) {
         uris.push(res.tracks.items[0].uri);
@@ -119,6 +140,8 @@ document.getElementById("transfer").onclick = async () => {
       } else {
         log("Not found: " + t.name);
       }
+      // update progress bar
+      progressBar.style.width = `${Math.round((i+1)/selectedTracks.length*100)}%`;
     }
 
     // add tracks in chunks of 100
@@ -128,8 +151,9 @@ document.getElementById("transfer").onclick = async () => {
     }
 
     log("🎉 Transfer complete!");
+    progressBar.style.width = "100%";
   } catch (e) {
-    log("Error: " + e.message);
+    log("❌ Error: " + e.message);
   }
 };
 </script>
