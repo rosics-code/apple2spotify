@@ -16,7 +16,7 @@
 <body>
 <h1>Apple Music → Spotify Transfer</h1>
 
-<p><strong>🔥 LAST CHANCE:</strong> This parser targets the **`included`** array in the JSON, which usually holds the actual track data. Paste the full JSON response (check for pagination!).</p>
+<p><strong>✨ Resource Mapping Mode:</strong> This code finds song details in the `resources` section. **Paste the full JSON** (check for pagination!).</p>
 
 <label>
   Spotify Playlist Name:
@@ -180,52 +180,108 @@ document.getElementById("fetchApple").onclick = async () => {
             log(`❌ Error: Failed to parse the pasted content as JSON. Did you copy the whole response? ${e.message}`);
             return;
         }
-
+        
         let tempTracks = [];
         
-        // 🌟 CORE NEW LOGIC: Look for tracks in the 'included' array OR the main data body.
+        // ===============================================
+        // PASS 1: Create lookup maps from the 'resources' section
+        // ===============================================
+        const artistLookup = {};
+        const songLookup = {};
+
+        if (jsonData.resources) {
+            // Map artists: ID -> Name
+            if (jsonData.resources.artists) {
+                for (const id in jsonData.resources.artists) {
+                    const artist = jsonData.resources.artists[id];
+                    if (artist.attributes && artist.attributes.name) {
+                        artistLookup[id] = artist.attributes.name;
+                    }
+                }
+                log(`🔍 Found ${Object.keys(artistLookup).length} artists in resources.`);
+            }
+
+            // Map songs: ID -> Song Details
+            if (jsonData.resources.songs) {
+                for (const id in jsonData.resources.songs) {
+                    const song = jsonData.resources.songs[id];
+                    if (song.attributes && song.attributes.name) {
+                        songLookup[id] = {
+                            name: song.attributes.name,
+                            artistId: song.relationships.artists.data[0].id // Grab the primary artist ID
+                        };
+                    }
+                }
+                log(`🔍 Found ${Object.keys(songLookup).length} songs in resources.`);
+            }
+        }
         
-        // 1. Process the 'included' array (often contains track details)
-        const possibleTracks = [];
-        if (jsonData.included && Array.isArray(jsonData.included)) {
-             jsonData.included.forEach(item => possibleTracks.push(item));
-        }
+        // ===============================================
+        // PASS 2: Extract tracks from the main playlist data and use maps
+        // ===============================================
+        const trackReferences = [];
 
-        // 2. Process the main 'data' array (might contain track items or the track list reference)
-        if (jsonData.data) {
-             // Handle array of playlists/albums
-             if (Array.isArray(jsonData.data)) {
-                 jsonData.data.forEach(item => {
-                     // Check for the tracks relationship inside the main data object
-                     if (item.relationships && item.relationships.tracks && item.relationships.tracks.data) {
-                         item.relationships.tracks.data.forEach(trackRef => possibleTracks.push(trackRef));
-                     }
-                 });
-             } else {
-                 // Handle single playlist/album object
-                 if (jsonData.data.relationships && jsonData.data.relationships.tracks && jsonData.data.relationships.tracks.data) {
-                     jsonData.data.relationships.tracks.data.forEach(trackRef => possibleTracks.push(trackRef));
-                 }
-             }
-        }
+        // Recursive function to find the core track data array references
+        const findTrackReferences = (data) => {
+            if (!data || typeof data !== 'object') return;
+            if (Array.isArray(data)) {
+                data.forEach(item => findTrackReferences(item));
+                return;
+            }
 
-
-        // 3. Extract final data from all found objects
-        possibleTracks.forEach(data => {
-            // Must have type 'songs' and attributes
-            if (data.type === "songs" && data.attributes) {
-                const name = data.attributes.name;
-                const artist = data.attributes.artistName;
-
-                // Only push valid tracks
-                if (name && artist) {
-                    tempTracks.push({name: name, artist: artist});
-                } else if (name || artist) {
-                    log(`⚠️ Skipped track due to missing name/artist in data.`);
+            // Check for the tracks relationship inside the main data object
+            if (data.relationships && data.relationships.tracks && data.relationships.tracks.data) {
+                data.relationships.tracks.data.forEach(trackRef => {
+                    if (trackRef.type === 'songs' || trackRef.type === 'music-videos') {
+                        trackReferences.push(trackRef);
+                    }
+                });
+                return;
+            }
+            
+            // Recurse through all properties
+            for (const key in data) {
+                 if (typeof data[key] === 'object') {
+                    findTrackReferences(data[key]);
                 }
             }
-        });
+        };
 
+        findTrackReferences(jsonData.data);
+        
+        if (trackReferences.length === 0) {
+            log("❌ Could not find any track references (relationships/tracks/data). Please check the API response for pagination or a different structure.");
+            return;
+        }
+
+        // Combine track info
+        trackReferences.forEach(trackRef => {
+            // 1. Try to get details from the main songLookup (if resources/songs exists)
+            let name = '';
+            let artist = '';
+            
+            if (songLookup[trackRef.id]) {
+                name = songLookup[trackRef.id].name;
+                artist = artistLookup[songLookup[trackRef.id].artistId] || 'Unknown Artist';
+            } else {
+                // 2. Fallback to extracting name/artist directly if the track itself is in 'included' (less likely but possible)
+                // This is less reliable but handles edge cases if trackRef holds full attributes
+                 if (trackRef.attributes) {
+                     name = trackRef.attributes.name;
+                     // Try to resolve artist from relationships on the track reference itself
+                     if (trackRef.relationships && trackRef.relationships.artists && trackRef.relationships.artists.data.length > 0) {
+                         const artistId = trackRef.relationships.artists.data[0].id;
+                         artist = artistLookup[artistId] || trackRef.attributes.artistName || 'Unknown Artist';
+                     } else {
+                        artist = trackRef.attributes.artistName || 'Unknown Artist';
+                     }
+                }
+            }
+
+            if (name && artist && name !== 'undefined') {
+                tempTracks.push({name, artist});
+            }
+        });
 
         // De-dupe the tracks
         appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
@@ -234,7 +290,7 @@ document.getElementById("fetchApple").onclick = async () => {
         });
 
         if (appleTracks.length === 0) {
-            log("❌ Zero unique, valid tracks found. The JSON structure is still different. Ensure you found the main API response for your playlist and check for pagination.");
+            log("❌ Zero unique, valid tracks found. Data structure is incompatible or you are missing pagination data.");
             return;
         }
 
