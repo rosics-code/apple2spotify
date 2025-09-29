@@ -54,7 +54,7 @@ const updateLoginUI = (isLoggedIn, userName) => {
     }
 };
 
-// PKCE/Spotify Auth functions (Untouched for brevity, assume they are correct)
+// PKCE/Spotify Auth functions (FIXED Uint8Array)
 function base64urlencode(buffer) {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
   return btoa(String.fromCharCode.apply(null, bytes))
@@ -66,7 +66,8 @@ async function sha256(buffer) {
 }
 
 async function generatePKCE() {
-  const verifier = Array.from(crypto.getRandomValues(new Uint8array(64)))
+  // 🚨 FIXED: Corrected Uint8array to Uint8Array
+  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64))) 
     .map(c => ('00' + c.toString(16)).slice(-2)).join("");
   const challenge = base64urlencode(await sha256(verifier));
   return { verifier, challenge };
