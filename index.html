@@ -31,38 +31,83 @@
 <button id="transfer" disabled>Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
-
 <pre id="log"></pre>
 
 <script>
-const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137"; // your app ID
-const SPOTIFY_REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html"; // fixed for GitHub Pages
+const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
+const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html";
 let spotifyToken = null;
 let spotifyUserId = null;
 let appleTracks = [];
 
 const log = msg => document.getElementById("log").textContent += msg + "\n";
 
-// Spotify login
-document.getElementById("spotifyLogin").onclick = () => {
+// PKCE helpers
+function base64urlencode(str) {
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(str)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function sha256(buffer) {
+  return await crypto.subtle.digest("SHA-256", new TextEncoder().encode(buffer));
+}
+
+// Generate PKCE code verifier and challenge
+async function generatePKCE() {
+  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64))).map(c => String.fromCharCode(c)).join("");
+  const challenge = base64urlencode(await sha256(verifier));
+  return { verifier, challenge };
+}
+
+// Spotify login with PKCE
+document.getElementById("spotifyLogin").onclick = async () => {
+  const { verifier, challenge } = await generatePKCE();
+  sessionStorage.setItem("pkce_verifier", verifier);
+
   const scopes = "playlist-modify-private playlist-modify-public";
-  const url = `https://accounts.spotify.com/authorize?response_type=token&client_id=${SPOTIFY_CLIENT_ID}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}`;
+  const url = `https://accounts.spotify.com/authorize?response_type=code&client_id=${SPOTIFY_CLIENT_ID}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&code_challenge_method=S256&code_challenge=${challenge}`;
   window.location.href = url;
 };
 
-// grab token from redirect
+// Exchange code for access token
+async function exchangeCodeForToken(code) {
+  const verifier = sessionStorage.getItem("pkce_verifier");
+  const body = new URLSearchParams({
+    client_id: SPOTIFY_CLIENT_ID,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: verifier
+  });
+  const resp = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString()
+  });
+  const data = await resp.json();
+  spotifyToken = data.access_token;
+  if (spotifyToken) {
+    const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
+    const userData = await userResp.json();
+    spotifyUserId = userData.id;
+    log("Spotify logged in as: " + spotifyUserId);
+  } else {
+    log("Failed to get access token");
+  }
+}
+
+// On page load, check for code in URL
 window.onload = () => {
-  if (window.location.hash.includes("access_token")) {
-    const params = new URLSearchParams(window.location.hash.slice(1));
-    spotifyToken = params.get("access_token");
-    log("Spotify token obtained.");
-    fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } })
-      .then(r => r.json())
-      .then(data => { spotifyUserId = data.id; log("Spotify user: " + spotifyUserId); });
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get("code");
+  if (code) {
+    // remove code from URL
+    window.history.replaceState({}, document.title, REDIRECT_URI);
+    exchangeCodeForToken(code);
   }
 };
 
-// Fetch Apple Music tracks
+// Fetch Apple Music tracks (same as before)
 document.getElementById("fetchApple").onclick = async () => {
   const appleUrl = document.getElementById("appleUrl").value.trim();
   if (!appleUrl) { log("Enter Apple Music URL"); return; }
@@ -83,7 +128,6 @@ document.getElementById("fetchApple").onclick = async () => {
   }
   log(`Found ${appleTracks.length} tracks`);
 
-  // display tracks with checkboxes
   const trackListDiv = document.getElementById("trackList");
   trackListDiv.innerHTML = "";
   appleTracks.forEach((t, i) => {
@@ -96,14 +140,13 @@ document.getElementById("fetchApple").onclick = async () => {
   document.getElementById("transfer").disabled = false;
 };
 
-// Transfer selected tracks to Spotify
+// Transfer selected tracks to Spotify (same as before)
 document.getElementById("transfer").onclick = async () => {
   if (!spotifyToken || !spotifyUserId) { log("Login to Spotify first!"); return; }
   const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
   if (!selectedTracks.length) { log("No tracks selected"); return; }
 
   const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
-  // create Spotify playlist
   const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
     method: "POST",
     headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
