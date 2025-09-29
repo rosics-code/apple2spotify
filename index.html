@@ -16,7 +16,7 @@
 <body>
 <h1>Apple Music → Spotify Transfer</h1>
 
-<p><strong>✨ JSON Mode - Final Boss:</strong> Paste the raw API **JSON response** from that playlist link.</p>
+<p><strong>✨ JSON Mode - Final Boss:</strong> Paste the raw API **JSON response** from that playlist link. NEW UPDATE</p>
 
 <label>
   Spotify Playlist Name:
@@ -65,7 +65,7 @@ async function sha256(buffer) {
 }
 
 async function generatePKCE() {
-  const verifier = Array.from(crypto.getRandomValues(new Uint8array(64)))
+  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64)))
     .map(c => ('00' + c.toString(16)).slice(-2)).join("");
   const challenge = base64urlencode(await sha256(verifier));
   return { verifier, challenge };
@@ -185,7 +185,7 @@ document.getElementById("fetchApple").onclick = async () => {
 
         let tempTracks = [];
         
-        // 🌟 NEW, MORE AGGRESSIVE PARSING LOGIC
+        // 🌟 FINAL, ULTRA-AGGRESSIVE PARSING LOGIC
         const extractTracks = (data) => {
             if (!data || typeof data !== 'object') return;
 
@@ -194,29 +194,33 @@ document.getElementById("fetchApple").onclick = async () => {
                 return;
             }
 
-            // Target the most likely track list path: data -> [0] -> relationships -> tracks -> data
-            try {
-                if (data.data && Array.isArray(data.data) && data.data[0].relationships.tracks.data) {
-                    data.data[0].relationships.tracks.data.forEach(song => {
-                        if (song.type === "songs" && song.attributes) {
-                             tempTracks.push({name: song.attributes.name, artist: song.attributes.artistName});
-                        }
-                    });
-                    // Success, exit recursion for this branch
-                    return; 
-                }
-            } catch (e) {
-                // Ignore errors here, as the path might not exist
-            }
-            
-            // Fallback: Check if the current object *is* a song
+            // 1. Check for the definitive song object first
             if (data.type === "songs" && data.attributes) {
-                tempTracks.push({name: data.attributes.name, artist: data.attributes.artistName});
+                // Ensure name and artist exist to prevent 'undefined'
+                const name = data.attributes.name;
+                const artist = data.attributes.artistName;
+
+                if (name && artist) {
+                    tempTracks.push({name: name, artist: artist});
+                } else if (name || artist) {
+                    // Log the weird undefined ones so you know what happened
+                    log(`⚠️ Skipped track due to missing name/artist: ${name || 'N/A'} by ${artist || 'N/A'}`);
+                }
+                // Skip deep-diving this song object
+                return; 
             }
 
-            // Deep search any remaining object properties
+            // 2. Check for the playlist tracks relationship
+            if (data.relationships && data.relationships.tracks && data.relationships.tracks.data) {
+                extractTracks(data.relationships.tracks.data);
+                // Skip deep-diving this entire relationship object
+                return;
+            }
+            
+            // 3. Recursive deep search for any other properties (like "data" wrappers or "included" sections)
             for (const key in data) {
-                if (typeof data[key] === 'object') {
+                // Only traverse properties that haven't been processed yet
+                if (key !== 'relationships' && typeof data[key] === 'object') {
                     extractTracks(data[key]);
                 }
             }
@@ -233,7 +237,7 @@ document.getElementById("fetchApple").onclick = async () => {
         });
 
         if (appleTracks.length === 0) {
-            log("❌ Zero tracks found. The JSON structure is still different. Try finding a different API response in the Network tab, or paste a public playlist's JSON (not a library one).");
+            log("❌ Zero unique, valid tracks found. The JSON structure is still different or all tracks are missing data. Try scrolling your playlist in the browser, then check the network tab again for more JSON requests (pagination).");
             return;
         }
 
