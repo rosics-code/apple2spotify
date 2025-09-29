@@ -62,7 +62,7 @@ async function generatePKCE() {
   return { verifier, challenge };
 }
 
-// Spotify login with PKCE
+// Spotify login with PKCE - SPOTIFY CODE UNTOUCHED
 document.getElementById("spotifyLogin").onclick = async () => {
   const { verifier, challenge } = await generatePKCE();
   sessionStorage.setItem("pkce_verifier", verifier);
@@ -82,7 +82,7 @@ document.getElementById("spotifyLogin").onclick = async () => {
   window.location.href = authUrl.toString();
 };
 
-// Exchange code for access token
+// Exchange code for access token - SPOTIFY CODE UNTOUCHED
 async function exchangeCodeForToken(code) {
   const verifier = sessionStorage.getItem("pkce_verifier");
   
@@ -133,20 +133,20 @@ window.onload = () => {
   }
 };
 
-// Fetch Apple Music tracks - NEW CORS PROXY APPLIED HERE
+// Fetch Apple Music tracks - CORS PROXY **FINALLY** CORRECTED
 document.getElementById("fetchApple").onclick = async () => {
     const appleUrl = document.getElementById("appleUrl").value.trim();
     if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
-    log("🔄 Bypassing CORS with a new proxy to fetch Apple Music playlist...");
+    log("🔄 Bypassing CORS with corsproxy.io...");
 
-    // 🌟 THE NEW FIX: Use a different public CORS proxy URL
-    const proxyUrl = `http://googleusercontent.com/corsproxy.io/get?url=${encodeURIComponent(appleUrl)}`;
+    // 🌟 THE FINAL FIX: Using the correct, absolute URL for the proxy
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(appleUrl)}`;
 
     try {
         // Fetch the data via the proxy
         const proxyResp = await fetch(proxyUrl);
-        // Note: corsproxy.io returns the raw content, unlike allorigins.win which wraps it in a JSON object.
+        // Note: corsproxy.io returns the raw content directly.
         const text = await proxyResp.text(); 
         
         // Check for an error response from the proxy/server itself before parsing
@@ -204,7 +204,7 @@ document.getElementById("fetchApple").onclick = async () => {
     }
 };
 
-// Transfer selected tracks to Spotify 
+// Transfer selected tracks to Spotify - SPOTIFY CODE UNTOUCHED
 document.getElementById("transfer").onclick = async () => {
   if (!spotifyToken || !spotifyUserId) { log("❌ Login to Spotify first!"); return; }
   const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
