@@ -37,11 +37,24 @@
 // NOTE: Ensure this REDIRECT_URI is set EXACTLY on your Spotify App Dashboard.
 const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
 const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html";
-let spotifyToken = null;
+let spotifyToken = localStorage.getItem("spotify_access_token"); // ✨ UPDATED: Load from local storage
 let spotifyUserId = null;
 let appleTracks = [];
 
 const log = msg => document.getElementById("log").textContent += msg + "\n";
+
+// Helper to update the UI after login
+const updateLoginUI = (isLoggedIn, userName) => { // ✨ NEW FUNCTION
+    const loginButton = document.getElementById("spotifyLogin");
+    if (isLoggedIn) {
+        loginButton.style.display = 'none';
+        log(`✅ Spotify logged in as: ${userName || 'User'}`);
+        document.getElementById("transfer").disabled = false;
+    } else {
+        loginButton.style.display = 'block';
+        document.getElementById("transfer").disabled = true;
+    }
+};
 
 // PKCE helpers
 function base64urlencode(buffer) {
@@ -67,25 +80,25 @@ document.getElementById("spotifyLogin").onclick = async () => {
   const { verifier, challenge } = await generatePKCE();
   sessionStorage.setItem("pkce_verifier", verifier);
 
-  // Added user-read-private scope which is required for the /me endpoint 
-  const scopes = "playlist-modify-private playlist-modify-public user-read-private"; 
-  
+  // Added user-read-private scope which is required for the /me endpoint 
+  const scopes = "playlist-modify-private playlist-modify-public user-read-private"; 
+  
   // FIXED ENDPOINT: Use the real Spotify authorize endpoint
-  const authUrl = new URL("https://accounts.spotify.com/authorize");
+  const authUrl = new URL("https://accounts.spotify.com/authorize"); // ✨ AUTH ENDPOINT FIXED
   authUrl.searchParams.append('response_type', 'code');
   authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
   authUrl.searchParams.append('scope', scopes);
   authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
   authUrl.searchParams.append('code_challenge_method', 'S256');
   authUrl.searchParams.append('code_challenge', challenge);
-  
+  
   window.location.href = authUrl.toString();
 };
 
 // Exchange code for access token - SPOTIFY CODE UNTOUCHED
 async function exchangeCodeForToken(code) {
   const verifier = sessionStorage.getItem("pkce_verifier");
-  
+  
   const body = new URLSearchParams({
     client_id: SPOTIFY_CLIENT_ID,
     grant_type: "authorization_code",
@@ -96,24 +109,25 @@ async function exchangeCodeForToken(code) {
 
   try {
     // FIXED ENDPOINT: Use the real Spotify token endpoint
-    const resp = await fetch("https://accounts.spotify.com/api/token", {
+    const resp = await fetch("https://accounts.spotify.com/api/token", { // ✨ TOKEN ENDPOINT FIXED
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString()
     });
-    
+    
     const data = await resp.json();
     spotifyToken = data.access_token;
-    
+    
     if (spotifyToken) {
+        localStorage.setItem("spotify_access_token", spotifyToken); // ✨ NEW: Save token to local storage
       // Validate token and get user ID
       // FIXED ENDPOINT: Use the real Spotify /me endpoint
-      const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
+      const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } }); // ✨ /ME ENDPOINT FIXED
       if (!userResp.ok) throw new Error("Failed to fetch user data.");
 
       const userData = await userResp.json();
       spotifyUserId = userData.id;
-      log("✅ Spotify logged in as: " + (userData.display_name || spotifyUserId));
+      updateLoginUI(true, userData.display_name || spotifyUserId); // ✨ UPDATED CALL
     } else {
       log("❌ Failed to get access token: " + (data.error_description || data.error || "Unknown error"));
     }
@@ -122,7 +136,32 @@ async function exchangeCodeForToken(code) {
   }
 }
 
-// On page load, check for code in URL
+// Function to validate and set token from local storage
+async function checkStoredToken() { // ✨ NEW FUNCTION
+    if (spotifyToken) {
+        try {
+            // FIXED ENDPOINT: Use the real Spotify /me endpoint
+            const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
+            if (userResp.ok) {
+                const userData = await userResp.json();
+                spotifyUserId = userData.id;
+                updateLoginUI(true, userData.display_name || spotifyUserId);
+                return;
+            } else {
+                // Token is likely expired, clear it
+                localStorage.removeItem("spotify_access_token");
+                spotifyToken = null;
+            }
+        } catch (e) {
+            log(`❌ Stored Token Check Failed: ${e.message}`);
+            localStorage.removeItem("spotify_access_token");
+            spotifyToken = null;
+        }
+    }
+    updateLoginUI(false);
+}
+
+// On page load, check for code in URL or token in storage
 window.onload = () => {
   const urlParams = new URLSearchParams(window.location.search);
   const code = urlParams.get("code");
@@ -130,80 +169,82 @@ window.onload = () => {
     // remove code from URL
     window.history.replaceState({}, document.title, REDIRECT_URI);
     exchangeCodeForToken(code);
-  }
+  } else {
+        checkStoredToken(); // ✨ NEW: Check for existing token
+    }
 };
 
 // Fetch Apple Music tracks - NEW REGEX FOR SHOEBOX
 document.getElementById("fetchApple").onclick = async () => {
-    const appleUrl = document.getElementById("appleUrl").value.trim();
-    if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
+    const appleUrl = document.getElementById("appleUrl").value.trim();
+    if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
-    log("🔄 Bypassing CORS with corsproxy.io...");
+    log("🔄 Bypassing CORS with corsproxy.io...");
 
-    // FINAL FIX: Using the correct, absolute URL for the proxy
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(appleUrl)}`;
+    // FINAL FIX: Using the correct, absolute URL for the proxy
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(appleUrl)}`;
 
-    try {
-        // Fetch the data via the proxy
-        const proxyResp = await fetch(proxyUrl);
-        // Note: corsproxy.io returns the raw content directly.
-        const text = await proxyResp.text(); 
-        
-        // Check for an error response from the proxy/server itself before parsing
-        if (!proxyResp.ok) {
-            throw new Error(`Proxy status: ${proxyResp.status} - ${text}`);
-        }
+    try {
+        // Fetch the data via the proxy
+        const proxyResp = await fetch(proxyUrl);
+        // Note: corsproxy.io returns the raw content directly.
+        const text = await proxyResp.text(); 
+        
+        // Check for an error response from the proxy/server itself before parsing
+        if (!proxyResp.ok) {
+            throw new Error(`Proxy status: ${proxyResp.status} - ${text}`);
+        }
 
-        // 🌟 THE UPDATE: Using a looser regex to find the shoebox-store script content
-        const jsonMatch = text.match(/<script[^>]*id="shoebox-store"[^>]*>([^<]+)<\/script>/);
-        
-        if (!jsonMatch || !jsonMatch[1]) { 
-            log("❌ Playlist JSON not found. Are you sure the URL is public and correct?"); 
-            return; 
-        }
-        
-        const jsonData = JSON.parse(jsonMatch[1]);
-        let tempTracks = []; 
-        
-        for (const key in jsonData) {
-            const items = jsonData[key].data;
-            if (!items) continue;
-            items.forEach(item => {
-                if(item.type === "playlists" || item.type === "albums") {
-                    const songs = item.relationships?.tracks?.data || [];
-                    songs.forEach(song => {
-                        if (song.type === "songs" && song.attributes) {
-                            tempTracks.push({name: song.attributes.name, artist: song.attributes.artistName});
-                        }
-                    });
-                }
-                if (item.type === "songs" && item.attributes) {
-                    tempTracks.push({name: item.attributes.name, artist: item.attributes.artistName});
-                }
-            });
-        }
+        // 🌟 THE UPDATE: Using a looser regex to find the shoebox-store script content
+        const jsonMatch = text.match(/<script[^>]*id="shoebox-store"[^>]*>([^<]+)<\/script>/);
+        
+        if (!jsonMatch || !jsonMatch[1]) { 
+            log("❌ Playlist JSON not found. Are you sure the URL is public and correct?"); 
+            return; 
+        }
+        
+        const jsonData = JSON.parse(jsonMatch[1]);
+        let tempTracks = []; 
+        
+        for (const key in jsonData) {
+            const items = jsonData[key].data;
+            if (!items) continue;
+            items.forEach(item => {
+                if(item.type === "playlists" || item.type === "albums") {
+                    const songs = item.relationships?.tracks?.data || [];
+                    songs.forEach(song => {
+                        if (song.type === "songs" && song.attributes) {
+                            tempTracks.push({name: song.attributes.name, artist: song.attributes.artistName});
+                        }
+                    });
+                }
+                if (item.type === "songs" && item.attributes) {
+                    tempTracks.push({name: item.attributes.name, artist: item.attributes.artistName});
+                }
+            });
+        }
 
-        // De-dupe the tracks
-        appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
-            const [name, artist] = str.split('|');
-            return { name, artist };
-        });
+        // De-dupe the tracks
+        appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
+            const [name, artist] = str.split('|');
+            return { name, artist };
+        });
 
-        log(`✅ Found ${appleTracks.length} unique tracks! Ready for transfer.`);
+        log(`✅ Found ${appleTracks.length} unique tracks! Ready for transfer.`);
 
-        const trackListDiv = document.getElementById("trackList");
-        trackListDiv.innerHTML = "";
-        appleTracks.forEach((t, i) => {
-            const div = document.createElement("div");
-            div.className = "track";
-            div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
-            trackListDiv.appendChild(div);
-        });
+        const trackListDiv = document.getElementById("trackList");
+        trackListDiv.innerHTML = "";
+        appleTracks.forEach((t, i) => {
+            const div = document.createElement("div");
+            div.className = "track";
+            div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
+            trackListDiv.appendChild(div);
+        });
 
-        document.getElementById("transfer").disabled = false;
-    } catch(e) {
-        log(`❌ Error fetching Apple Music playlist: ${e.message}. Double-check the URL!`);
-    }
+        document.getElementById("transfer").disabled = !spotifyToken; // ✨ UPDATED: Enable only if Spotify is logged in
+    } catch(e) {
+        log(`❌ Error fetching Apple Music playlist: ${e.message}. Double-check the URL!`);
+    }
 };
 
 // Transfer selected tracks to Spotify - SPOTIFY CODE UNTOUCHED
@@ -217,7 +258,7 @@ document.getElementById("transfer").onclick = async () => {
   try {
     // Create Playlist
     // FIXED ENDPOINT: Use the real Spotify playlists endpoint
-    const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
+    const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, { // ✨ PLAYLIST ENDPOINT FIXED
       method: "POST",
       headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ name: playlistName, public: false })
@@ -229,8 +270,8 @@ document.getElementById("transfer").onclick = async () => {
     // Search for Tracks
     // FIXED ENDPOINT: Use the real Spotify search endpoint
     for (const t of selectedTracks) {
-      const query = encodeURIComponent(`${t.name} ${t.artist}`);
-      const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: "Bearer " + spotifyToken } });
+      const query = encodeURIComponent(`track:${t.name} artist:${t.artist}`); // Better search query
+      const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: "Bearer " + spotifyToken } }); // ✨ SEARCH ENDPOINT FIXED
       const data = await searchResp.json();
       if (data.tracks.items.length) {
         uris.push(data.tracks.items[0].uri);
@@ -246,7 +287,7 @@ document.getElementById("transfer").onclick = async () => {
     // FIXED ENDPOINT: Use the real Spotify add tracks endpoint
     for (let i = 0; i < uris.length; i += 100) {
       const chunk = uris.slice(i, i + 100);
-      await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+      await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, { // ✨ ADD TRACKS ENDPOINT FIXED
         method: "POST",
         headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({ uris: chunk })
