@@ -13,6 +13,18 @@ button:hover{background:#17a44c;}
 #trackList{max-height:350px; overflow-y:auto; border:1px solid #ccc; padding:10px; border-radius:5px; background:white; margin-top:10px;}
 .track{display:flex; align-items:center; margin-bottom:5px;}
 .track label{flex:1; cursor:pointer;}
+/* UI Status Indicator Style */
+#spotifyStatus{
+    margin-top: -10px; 
+    margin-bottom: 10px; 
+    font-weight: bold; 
+    padding: 5px; 
+    border-radius: 4px;
+    text-align: center;
+}
+.status-logged-out { background-color: #ffdddd; color: #cc0000; border: 1px solid #cc0000; }
+.status-logged-in { background-color: #ddffdd; color: #1DB954; border: 1px solid #1DB954; }
+
 #log{max-height:200px; overflow-y:auto; background:#222; color:#0f0; padding:10px; border-radius:5px; font-family:monospace; margin-top:10px;}
 #progressContainer{width:100%; background:#ddd; height:20px; border-radius:10px; margin-top:10px; display:none;}
 #progressBar{width:0%; height:100%; background:#1DB954; border-radius:10px; transition:width 0.2s;}
@@ -27,7 +39,9 @@ button:hover{background:#17a44c;}
 <label>Spotify Playlist Name:</label>
 <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
 
-<button id="fetchApple">Fetch Apple Tracks / Login to Spotify</button>
+<div id="spotifyStatus" class="status-logged-out">Spotify: Unauthorized</div>
+
+<button id="fetchApple">Fetch Apple Tracks</button>
 <button id="transfer" disabled>Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
@@ -49,6 +63,7 @@ window.onload = async () => {
   const progressBar = document.getElementById("progressBar");
   const fetchAppleBtn = document.getElementById("fetchApple");
   const transferBtn = document.getElementById("transfer");
+  const statusEl = document.getElementById("spotifyStatus"); // New Status Element
 
   const log = msg => { logEl.textContent += msg + "\n"; logEl.scrollTop = logEl.scrollHeight; };
   let appleTracks = [];
@@ -58,13 +73,13 @@ window.onload = async () => {
   function getHashParams() {
     const hash = window.location.hash.substring(1);
     const params = {};
-    hash.split("&").forEach(kv => { const [key,val] = kv.split("="); params[key] = decodeURIComponent(val.replace(/\+/g, ' ')); }); // Added decodeURIComponent fix
+    hash.split("&").forEach(kv => { const [key,val] = kv.split("="); params[key] = decodeURIComponent(val.replace(/\+/g, ' ')); });
     return params;
   }
   
   // ---- Spotify Auth Functions ----
   function redirectToSpotifyAuth() {
-    // 🔥 FIX: Corrected the Spotify authorization URL 
+    // 🔥 FIX: Corrected the Spotify authorization URL and Client ID insertion
     const authUrl = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
     window.location = authUrl;
   }
@@ -73,25 +88,37 @@ window.onload = async () => {
     const params = getHashParams();
     if (params.access_token) {
       spotifyApi.setAccessToken(params.access_token);
-      // Remove hash from URL to clean up the address bar
+      // Clean up the URL hash after grabbing the token
       window.history.pushState("", document.title, window.location.pathname + window.location.search);
       
       try {
         const me = await spotifyApi.getMe();
         spotifyUserId = me.id;
-        log("✅ Spotify logged in as: " + me.display_name || spotifyUserId);
-        fetchAppleBtn.textContent = "Fetch Apple Tracks"; // Update button text
+        
+        // ✨ UI Update for success
+        const displayName = me.display_name || spotifyUserId;
+        log(`✅ Spotify logged in as: ${displayName}`);
+        statusEl.textContent = `Spotify: Logged in as ${displayName}`;
+        statusEl.className = "status-logged-in";
         transferBtn.disabled = false;
+
       } catch(e) { 
         log("❌ Failed to get Spotify user. Token may be expired."); 
         spotifyApi.setAccessToken(null); // Clear the bad token
+        
+        // ✨ UI Update for failure
+        statusEl.textContent = "Spotify: Authorization Failed/Expired";
+        statusEl.className = "status-logged-out";
       }
     } else {
-        log("⚠️ Not logged into Spotify. Click 'Fetch Apple Tracks / Login to Spotify' to start.");
+        // ✨ UI Update for default state
+        log("⚠️ Not logged into Spotify. Click 'Fetch Apple Tracks' to authorize/login first.");
+        statusEl.textContent = "Spotify: Click 'Fetch' to Log In";
+        statusEl.className = "status-logged-out";
     }
   }
 
-  // Check for an existing token on load
+  // Check for an existing token on load (but DO NOT redirect)
   await handleAuthToken();
 
   // ---- Fetch Apple Tracks / Login Trigger ----
@@ -109,52 +136,43 @@ window.onload = async () => {
 
     log("🔄 Fetching Apple Music playlist...");
     try {
-      // Note: This scrape method is fragile and depends on Apple Music page structure.
       const resp = await fetch(appleUrl);
       const text = await resp.text();
       const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
       if (!jsonMatch) { log("❌ Playlist JSON not found (Apple Music page structure changed?)"); return; }
 
       const jsonData = JSON.parse(jsonMatch[1]);
-      appleTracks = [];
-      // Looping through the shoebox data to find track information
+      let tempTracks = [];
+      
+      // Scrape Logic (kept the previous logic that looks for songs in relationships/directly)
       for (const key in jsonData) {
         const items = jsonData[key].data;
-        // Check if it's the right kind of data (an array with relationship info)
         if (!items || !Array.isArray(items)) continue; 
         
-        // Find playlist/album objects, then look at their relationships for tracks
         items.forEach(item => {
             if(item.type === "playlists" || item.type === "albums") {
                 const songs = item.relationships?.tracks?.data || [];
                 songs.forEach(song => {
                     if (song.type === "songs" && song.attributes) {
-                        appleTracks.push({
+                        tempTracks.push({
                             name: song.attributes.name,
                             artist: song.attributes.artistName
                         });
                     }
                 });
             }
-        });
-        
-        // This is a simpler fallback from the original code that sometimes works for solo tracks/non-related songs
-        items.forEach(item => { 
+            // Fallback for tracks listed directly
             if(item.type==="songs" && item.attributes) {
-                // Only push if it hasn't been added from the relationship check
-                if (!appleTracks.some(t => t.name === item.attributes.name && t.artist === item.attributes.artistName)) {
-                     appleTracks.push({name:item.attributes.name,artist:item.attributes.artistName});
-                }
+                 tempTracks.push({name:item.attributes.name,artist:item.attributes.artistName});
             }
         });
       }
 
-      // De-dupe the tracks just in case
-      const uniqueTracks = Array.from(new Set(appleTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
+      // De-dupe the tracks
+      appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
         const [name, artist] = str.split('|');
         return { name, artist };
       });
-      appleTracks = uniqueTracks;
 
 
       log(`✅ Found ${appleTracks.length} unique tracks`);
@@ -164,7 +182,6 @@ window.onload = async () => {
       appleTracks.forEach((t,i)=>{ 
         const div=document.createElement("div"); 
         div.className="track";
-        // Ensure checkboxes are uniquely identified
         div.innerHTML=`<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
         trackListDiv.appendChild(div);
       });
@@ -187,7 +204,7 @@ window.onload = async () => {
     const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
     try {
-      // 1. Create the new playlist (public: false is good for privacy)
+      // 1. Create the new playlist
       const newPlaylist = await spotifyApi.createPlaylist(spotifyUserId,{name:playlistName,public:false});
       log("✅ Created Spotify playlist: "+newPlaylist.name);
       
@@ -203,9 +220,9 @@ window.onload = async () => {
         
         if(res.tracks.items.length) {
             uris.push(res.tracks.items[0].uri);
-            log("Matched: "+t.name + " by " + t.artist);
+            log("Matched: "+t.name);
         } else {
-             log("Not found: "+t.name + " by " + t.artist);
+             log("Not found: "+t.name);
         }
         
         progressBar.style.width=`${Math.round((i+1)/selectedTracks.length*100)}%`;
@@ -213,12 +230,11 @@ window.onload = async () => {
 
       log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
 
-      // 3. Add tracks in batches (Spotify limits additions to 100 tracks per request)
+      // 3. Add tracks in batches (100 max per request)
       const BATCH_SIZE = 100;
       for(let i=0;i<uris.length;i+=BATCH_SIZE) {
           const batch = uris.slice(i,i+BATCH_SIZE);
           await spotifyApi.addTracksToPlaylist(newPlaylist.id, batch);
-          log(`Added batch ${Math.ceil((i+1)/BATCH_SIZE)} of ${Math.ceil(uris.length/BATCH_SIZE)}`);
       }
       
       log("🎉 Transfer complete! Check Spotify for your playlist.");
