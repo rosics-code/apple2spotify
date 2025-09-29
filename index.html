@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Apple2Spotify - PKCE Enhanced</title>
+<title>Apple2Spotify - Hybrid Auth</title>
 <style>
 /* ... (Existing CSS remains the same) ... */
 body { font-family: "Segoe UI", sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f0f2f5; }
@@ -15,7 +15,7 @@ button:hover { background: #17a44c; }
 .track { display: flex; align-items: center; margin-bottom: 5px; }
 .track label { flex: 1; cursor: pointer; }
 
-/* New Status Bar CSS for clear feedback */
+/* Status Indicator Style */
 #spotifyStatus{
     margin-top: -10px; 
     margin-bottom: 10px; 
@@ -33,7 +33,7 @@ button:hover { background: #17a44c; }
 </style>
 </head>
 <body>
-<h1>🎵 Apple Music → Spotify Transfer (PKCE Enhanced) 🎵</h1>
+<h1>🎵 Apple Music → Spotify Transfer (Hybrid Auth) 🎵</h1>
 
 <label>Apple Music Public Playlist URL:</label>
 <input type="text" id="appleUrl" placeholder="https://music.apple.com/...">
@@ -41,12 +41,13 @@ button:hover { background: #17a44c; }
 <label>Spotify Playlist Name:</label>
 <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
 
-<div id="spotifyStatus" class="status-logged-out">Spotify: Click 'Fetch' to Log In</div>
+<div id="spotifyStatus" class="status-logged-out">Spotify: Attempting Auto-Login or Paste Token Below</div>
 
-<label>Current Spotify Access Token (Read-Only):</label>
-<input type="text" id="spotifyTokenInput" placeholder="Token will appear here after login..." readonly>
+<label>Current/Manual Spotify Access Token:</label>
+<input type="text" id="spotifyTokenInput" placeholder="Token will appear here or paste a new one...">
 
-<button id="fetchApple">Fetch Apple Tracks / Login to Spotify</button>
+<button id="setToken">Validate/Set Spotify Token</button>
+<button id="fetchApple">Fetch Apple Tracks / Login via Spotify</button>
 <button id="transfer" disabled>Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
@@ -68,7 +69,7 @@ window.onload = async () => {
   const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html"; 
   
   const SCOPES = "playlist-modify-public playlist-modify-private user-read-private";
-  const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'; 
+  const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'; // Using the official endpoint
 
   const spotifyApi = new SpotifyWebApi();
   const logEl = document.getElementById("log");
@@ -86,9 +87,16 @@ window.onload = async () => {
 
   let appleTracks = [];
   let spotifyUserId = null;
-
-
-  // --- PKCE Utility Functions (from previous version) ---
+  
+  const setAuthStatus = (loggedIn, message) => {
+      statusEl.textContent = message;
+      statusEl.className = loggedIn ? "status-logged-in" : "status-logged-out";
+      transferBtn.disabled = !loggedIn;
+      // Also enable the manual set button to allow quick testing/re-login
+      document.getElementById("setToken").disabled = false; 
+  };
+  
+  // --- PKCE Utility Functions (Required for the auto-auth and refresh parts) ---
 
   const generateRandomString = (length) => {
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -108,7 +116,7 @@ window.onload = async () => {
     return base64UrlEncode(hashed);
   };
   
-  // --- Auth Flow Functions ---
+  // --- PKCE Auth Flow Functions ---
 
   const redirectToSpotifyAuth = async () => {
     const codeVerifier = generateRandomString(128);
@@ -131,10 +139,7 @@ window.onload = async () => {
   const exchangeCodeForToken = async (code) => {
     const codeVerifier = localStorage.getItem('spotify_code_verifier');
     
-    if (!codeVerifier) {
-      log("❌ PKCE Error: Code verifier not found.");
-      return null;
-    }
+    if (!codeVerifier) return null;
     
     const params = new URLSearchParams();
     params.append('client_id', SPOTIFY_CLIENT_ID);
@@ -152,7 +157,8 @@ window.onload = async () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(`Token exchange failed. Error: ${errorData.error_description || errorData.error}`);
+        log(`❌ PKCE Exchange Failed: ${errorData.error_description || errorData.error}`);
+        throw new Error(`Token exchange failed. Error: ${errorData.error || response.status}`);
       }
       
       const data = await response.json();
@@ -164,7 +170,7 @@ window.onload = async () => {
       return data.access_token;
       
     } catch(e) {
-      log("❌ Failed to exchange code for token: " + e.message);
+      log("❌ Failed PKCE Code Exchange. Fallback to manual token.");
       return null;
     }
   };
@@ -196,64 +202,80 @@ window.onload = async () => {
         return data.access_token;
 
       } catch (e) {
-        log("❌ Auto-refresh failed. Please log in again.");
+        log("❌ Auto-refresh failed. Refresh token deleted.");
         localStorage.removeItem('spotify_access_token');
         localStorage.removeItem('spotify_refresh_token');
         return null;
       }
   };
+  
+  const validateTokenAndSetUser = async (token) => {
+      if (!token) return false;
+      spotifyApi.setAccessToken(token);
+      tokenInputEl.value = token;
+      try {
+          const me = await spotifyApi.getMe();
+          spotifyUserId = me.id;
+          const displayName = me.display_name || spotifyUserId;
+          setAuthStatus(true, `Spotify: Logged in as ${displayName} (Token Valid)`);
+          log(`✅ Spotify logged in as: ${displayName}`);
+          return true;
+      } catch (e) {
+          log("❌ Token validation failed. Token is expired or invalid.");
+          spotifyApi.setAccessToken(null);
+          return false;
+      }
+  };
 
+
+  // --- Main Auth Setup on Page Load ---
   const setupAuth = async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     let token = localStorage.getItem('spotify_access_token');
 
-    // 1. Handle Redirect from Spotify (Exchange Code for Token)
+    // 1. Handle PKCE Redirect/Exchange
     if (code) {
       log("✅ Spotify redirect detected. Exchanging code for token...");
       token = await exchangeCodeForToken(code);
-      
       // Clean up the URL query parameters
       window.history.replaceState(null, '', REDIRECT_URI); 
     } 
     
-    // 2. Try to refresh existing token if the current token is missing/expired
-    if (!token) {
+    // 2. Try to refresh existing token
+    if (!token && localStorage.getItem('spotify_refresh_token')) {
         token = await refreshToken();
     }
     
-    // 3. Final status check
+    // 3. Validate token or set unauthorized status
     if (token) {
-      spotifyApi.setAccessToken(token);
-      tokenInputEl.value = token; // Display token in the input field
-      
-      try {
-        const me = await spotifyApi.getMe();
-        spotifyUserId = me.id;
-        
-        const displayName = me.display_name || spotifyUserId;
-        statusEl.textContent = `Spotify: Logged in as ${displayName}`;
-        statusEl.className = "status-logged-in";
-        transferBtn.disabled = false;
-
-      } catch(e) { 
-        log("❌ Token failed validation. Please log in again.");
-        localStorage.removeItem('spotify_access_token');
-        statusEl.textContent = "Spotify: Session Expired. Click 'Fetch' to Log In.";
-        statusEl.className = "status-logged-out";
-      }
+        await validateTokenAndSetUser(token);
     } else {
-        statusEl.textContent = "Spotify: Click 'Fetch' to Log In";
-        statusEl.className = "status-logged-out";
-        tokenInputEl.value = "Unauthorized or expired. Token will appear here.";
+        setAuthStatus(false, "Spotify: Authorization needed (Click 'Fetch' or paste token)");
+        tokenInputEl.value = ""; // Clear if unauthorized
     }
   };
   
   await setupAuth();
 
 
-  // ---- Fetch Apple Tracks / Login Trigger ----
-  fetchAppleBtn.onclick = async () => {
+  // --- Event Listeners ---
+
+  // Manual Token Setter/Validator
+  document.getElementById("setToken").onclick = async () => {
+    const token = tokenInputEl.value.trim();
+    if (!token) { 
+        log("❌ Enter a Spotify token or use the automatic login button."); 
+        setAuthStatus(false, "Spotify: Authorization needed (Click 'Fetch' or paste token)");
+        return; 
+    }
+    await validateTokenAndSetUser(token);
+  };
+  
+
+  // Fetch Apple Music tracks / Login Trigger
+  document.getElementById("fetchApple").onclick = async () => {
+    // If not logged in, trigger the PKCE redirect (Step 1 of PKCE)
     if (!spotifyApi.getAccessToken()) {
         log("🔄 Redirecting to Spotify login for authorization...");
         redirectToSpotifyAuth(); 
@@ -272,14 +294,12 @@ window.onload = async () => {
       if (!jsonMatch) { log("❌ Playlist JSON not found"); return; }
 
       const jsonData = JSON.parse(jsonMatch[1]);
-      let tempTracks = []; // Use a temporary array to collect tracks
+      let tempTracks = []; 
       
-      // Scrape Logic (kept close to the working version)
       for (const key in jsonData) {
         const items = jsonData[key].data;
         if (!items) continue;
         
-        // This is a more comprehensive check based on common Apple Music JSON structure
         items.forEach(item => {
             if(item.type === "playlists" || item.type === "albums") {
                 const songs = item.relationships?.tracks?.data || [];
@@ -289,7 +309,6 @@ window.onload = async () => {
                     }
                 });
             }
-            // Fallback for tracks listed directly
             if (item.type === "songs" && item.attributes) {
                  tempTracks.push({name: item.attributes.name, artist: item.attributes.artistName});
             }
@@ -304,7 +323,6 @@ window.onload = async () => {
 
       log(`✅ Found ${appleTracks.length} unique tracks`);
 
-      // display tracks with checkboxes
       const trackListDiv = document.getElementById("trackList");
       trackListDiv.innerHTML = "";
       appleTracks.forEach((t, i) => {
@@ -322,14 +340,18 @@ window.onload = async () => {
 
   // Transfer selected tracks to Spotify
   document.getElementById("transfer").onclick = async () => {
-    if (!spotifyUserId) { log("❌ Log in to Spotify first"); return; }
+    if (!spotifyUserId) { log("❌ Log in to Spotify first (Click 'Fetch' or set token manually)."); return; }
     
-    // Check if the token might be expired before starting the transfer
+    // Check if the token might be expired just before transfer
     if (!spotifyApi.getAccessToken()) {
         const newToken = await refreshToken();
-        if (!newToken) { log("❌ Session expired. Please click 'Fetch' to log in again."); return; }
-        spotifyApi.setAccessToken(newToken);
-        tokenInputEl.value = newToken;
+        if (newToken) {
+             await validateTokenAndSetUser(newToken);
+        } else {
+             log("❌ Session expired. Please click 'Fetch' to log in again or paste a new token.");
+             setAuthStatus(false, "Spotify: Session Expired. Re-Auth Required.");
+             return; 
+        }
     }
 
     const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
@@ -338,18 +360,15 @@ window.onload = async () => {
     const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
     try {
-      // 1. Create playlist
       const newPlaylist = await spotifyApi.createPlaylist(spotifyUserId, { name: playlistName, public: false });
       log("✅ Created Spotify playlist: " + newPlaylist.name);
 
       progressContainer.style.display = "block";
       progressBar.style.width = "0%";
 
-      // 2. Search & add tracks
       const uris = [];
       for (let i = 0; i < selectedTracks.length; i++) {
         const t = selectedTracks[i];
-        // Simplified search string based on the working version
         const res = await spotifyApi.searchTracks(`${t.name} ${t.artist}`, { limit: 1 }); 
         
         if (res.tracks.items.length) {
@@ -361,10 +380,10 @@ window.onload = async () => {
         progressBar.style.width = `${Math.round((i+1)/selectedTracks.length*100)}%`;
       }
 
-      // 3. Add tracks in chunks of 100
       log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
-      for (let i = 0; i < uris.length; i += 100) {
-        const chunk = uris.slice(i, i + 100);
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < uris.length; i += BATCH_SIZE) {
+        const chunk = uris.slice(i, i + BATCH_SIZE);
         await spotifyApi.addTracksToPlaylist(newPlaylist.id, chunk);
         log(`Added batch ${Math.ceil((i+1)/100)} of ${Math.ceil(uris.length/100)}`);
       }
