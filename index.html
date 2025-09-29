@@ -38,7 +38,8 @@ button:hover{background:#17a44c;}
 
 <script>
 window.onload = async () => {
-  const REDIRECT_URI = window.location.href.split('#')[0]; // auto-detect current page (works with /index.html or /)
+  const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137"; // <-- replace with your real client ID
+  const REDIRECT_URI = window.location.href.split('#')[0]; // auto-detect /index.html or /
   const SCOPES = "playlist-modify-public playlist-modify-private user-read-private";
 
   const spotifyApi = new SpotifyWebApi();
@@ -70,7 +71,7 @@ window.onload = async () => {
         log("✅ Spotify logged in as: " + spotifyUserId);
       } catch(e) { log("❌ Failed to get Spotify user: " + e.message); }
     } else {
-      const authUrl = `https://accounts.spotify.com/authorize?client_id=79fe3f4e650b4e65b800afeb15dc19e3&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
+      const authUrl = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
       window.location = authUrl;
     }
   }
