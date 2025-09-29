@@ -53,11 +53,15 @@ button:hover{background:#17a44c;}
 
 <script>
 window.onload = async () => {
-  // ⚠️ CHANGE THIS: Replace with your actual Spotify Client ID 
+  // ⚠️ ACTION REQUIRED: Replace with your actual Spotify Client ID
   const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137"; 
-  const REDIRECT_URI = window.location.href.split('?')[0].split('#')[0]; // Clean up URL
+  
+  // 🔥 FIX: HARDCODED REDIRECT URI. This MUST exactly match the URL registered in your Spotify App settings.
+  // Assuming your deployed URL is: https://rosics-code.github.io/apple2spotify/index.html
+  const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html";
+  
   const SCOPES = "playlist-modify-public playlist-modify-private user-read-private";
-  const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'; // Spotify's Token Exchange Endpoint
+  const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'; 
 
   const spotifyApi = new SpotifyWebApi();
   const logEl = document.getElementById("log");
@@ -73,14 +77,12 @@ window.onload = async () => {
 
   // --- PKCE Utility Functions ---
 
-  // Generate a random string for the code verifier
   const generateRandomString = (length) => {
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     const values = window.crypto.getRandomValues(new Uint8Array(length));
     return values.reduce((acc, x) => acc + possible[x % possible.length], "");
   };
 
-  // Convert an array buffer to a Base64URL string (required for PKCE)
   const base64UrlEncode = (input) => {
     return btoa(String.fromCharCode(...new Uint8Array(input)))
       .replace(/=/g, '')
@@ -88,7 +90,6 @@ window.onload = async () => {
       .replace(/\//g, '_');
   };
 
-  // Hash the code verifier to create the code challenge
   const pkceChallengeFromVerifier = async (v) => {
     const hashed = await window.crypto.subtle.digest('SHA-256', (new TextEncoder()).encode(v));
     return base64UrlEncode(hashed);
@@ -96,19 +97,16 @@ window.onload = async () => {
   
   // --- Auth Flow Functions ---
 
-  // Step 1: Redirect to Spotify for Authorization Code
   const redirectToSpotifyAuth = async () => {
     const codeVerifier = generateRandomString(128);
     const codeChallenge = await pkceChallengeFromVerifier(codeVerifier);
 
-    // Save the verifier for the next step
     localStorage.setItem('spotify_code_verifier', codeVerifier); 
 
     const authUrl = new URL('https://accounts.spotify.com/authorize?client_id=$');
     
-    // Set parameters for the Authorization Code flow (PKCE)
     authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
-    authUrl.searchParams.append('response_type', 'code'); // Key change from 'token' to 'code'
+    authUrl.searchParams.append('response_type', 'code');
     authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
     authUrl.searchParams.append('scope', SCOPES);
     authUrl.searchParams.append('code_challenge_method', 'S256');
@@ -117,7 +115,6 @@ window.onload = async () => {
     window.location.href = authUrl.toString();
   };
 
-  // Step 2: Exchange the Authorization Code for the Access Token
   const exchangeCodeForToken = async (code) => {
     const codeVerifier = localStorage.getItem('spotify_code_verifier');
     
@@ -131,7 +128,7 @@ window.onload = async () => {
     params.append('grant_type', 'authorization_code');
     params.append('code', code);
     params.append('redirect_uri', REDIRECT_URI);
-    params.append('code_verifier', codeVerifier); // The magic of PKCE!
+    params.append('code_verifier', codeVerifier);
     
     try {
       const response = await fetch(SPOTIFY_TOKEN_URL, {
@@ -140,11 +137,13 @@ window.onload = async () => {
         body: params
       });
 
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Token exchange failed. Error: ${errorData.error_description || errorData.error}`);
+      }
       
       const data = await response.json();
       
-      // Store tokens and clear verifier
       localStorage.setItem('spotify_access_token', data.access_token);
       localStorage.setItem('spotify_refresh_token', data.refresh_token);
       localStorage.removeItem('spotify_code_verifier'); 
@@ -157,7 +156,6 @@ window.onload = async () => {
     }
   };
   
-  // Refreshes the token using the stored refresh token
   const refreshToken = async () => {
       const refreshTokenValue = localStorage.getItem('spotify_refresh_token');
       if (!refreshTokenValue) return null;
@@ -179,7 +177,6 @@ window.onload = async () => {
         const data = await response.json();
         
         localStorage.setItem('spotify_access_token', data.access_token);
-        // Spotify may not always return a new refresh token, so update if present
         if (data.refresh_token) localStorage.setItem('spotify_refresh_token', data.refresh_token);
         
         log("🔄 Access token refreshed.");
@@ -193,7 +190,6 @@ window.onload = async () => {
       }
   };
 
-  // Main login check and setup on load
   const setupAuth = async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
@@ -203,11 +199,12 @@ window.onload = async () => {
     if (code) {
       log("✅ Spotify redirect detected. Exchanging code for token...");
       token = await exchangeCodeForToken(code);
+      
       // Clean up the URL query parameters
       window.history.replaceState(null, '', REDIRECT_URI); 
     } 
     
-    // 2. Try to refresh existing token if no code was found and token is old/missing
+    // 2. Try to refresh existing token if the current token is missing/expired
     if (!token) {
         token = await refreshToken();
     }
@@ -218,6 +215,7 @@ window.onload = async () => {
       try {
         const me = await spotifyApi.getMe();
         spotifyUserId = me.id;
+        
         const displayName = me.display_name || spotifyUserId;
         statusEl.textContent = `Spotify: Logged in as ${displayName}`;
         statusEl.className = "status-logged-in";
@@ -240,14 +238,13 @@ window.onload = async () => {
 
   // ---- Fetch Apple Tracks / Login Trigger ----
   fetchAppleBtn.onclick = async () => {
-    // If not logged in, trigger the login redirect (Step 1 of PKCE)
     if (!spotifyApi.getAccessToken()) {
         log("🔄 Redirecting to Spotify login for authorization...");
         redirectToSpotifyAuth(); 
         return; 
     }
     
-    // --- START of Apple Fetch Logic (runs only if logged in) ---
+    // --- Apple Fetch Logic ---
     const appleUrl = document.getElementById("appleUrl").value.trim();
     if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
@@ -305,7 +302,6 @@ window.onload = async () => {
       });
       transferBtn.disabled=false;
     } catch(e) { log("❌ Error fetching Apple Music playlist: "+e.message); }
-    // --- END of Apple Fetch Logic ---
   };
 
   // ---- Transfer Tracks to Spotify ----
@@ -321,18 +317,15 @@ window.onload = async () => {
     const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
     try {
-      // 1. Create the new playlist
       const newPlaylist = await spotifyApi.createPlaylist(spotifyUserId,{name:playlistName,public:false});
       log("✅ Created Spotify playlist: "+newPlaylist.name);
       
       progressContainer.style.display="block";
       progressBar.style.width="0%";
 
-      // 2. Search Spotify for URIs
       const uris=[];
       for(let i=0;i<selectedTracks.length;i++){
         const t=selectedTracks[i];
-        // Search using track name and artist for best match
         const res=await spotifyApi.searchTracks(`track:${t.name} artist:${t.artist}`,{limit:1});
         
         if(res.tracks.items.length) {
@@ -347,7 +340,6 @@ window.onload = async () => {
 
       log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
 
-      // 3. Add tracks in batches (100 max per request)
       const BATCH_SIZE = 100;
       for(let i=0;i<uris.length;i+=BATCH_SIZE) {
           const batch = uris.slice(i,i+BATCH_SIZE);
@@ -358,7 +350,7 @@ window.onload = async () => {
       progressBar.style.width="100%";
     } catch(e){
         log("❌ Error during transfer: "+e.message);
-        progressContainer.style.display="none"; // Hide progress on fail
+        progressContainer.style.display="none";
     }
   };
 };
