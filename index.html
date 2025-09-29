@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Apple Music → Spotify Transfer</title>
+</head>
+<body>
+  <h1>Apple Music → Spotify Transfer</h1>
+
+  <label>
+    Apple Music Public Playlist URL:
+    <input type="text" id="appleUrl" size="60" placeholder="https://music.apple.com/...">
+  </label>
+  <br><br>
+
+  <label>
+    Spotify Playlist Name:
+    <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
+  </label>
+  <br><br>
+
+  <button id="spotifyLogin">Login to Spotify</button>
+  <button id="transfer">Transfer Playlist</button>
+
+  <pre id="log"></pre>
+
+  <script>
+    const SPOTIFY_CLIENT_ID = "YOUR_SPOTIFY_CLIENT_ID"; // <-- replace this
+    const SPOTIFY_REDIRECT_URI = window.location.href;  // must match your Redirect URI in Spotify Dashboard
+    let spotifyToken = null;
+    let spotifyUserId = null;
+
+    const log = msg => document.getElementById("log").textContent += msg + "\n";
+
+    // ---- Spotify login ----
+    document.getElementById("spotifyLogin").onclick = () => {
+      const scopes = "playlist-modify-private playlist-modify-public";
+      const url = `https://accounts.spotify.com/authorize?response_type=token&client_id=${SPOTIFY_CLIENT_ID}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}`;
+      window.location.href = url;
+    };
+
+    // grab token from redirect hash
+    window.onload = () => {
+      if (window.location.hash.includes("access_token")) {
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        spotifyToken = params.get("access_token");
+        log("Spotify access token obtained.");
+
+        fetch("https://api.spotify.com/v1/me", {
+          headers: { Authorization: "Bearer " + spotifyToken }
+        })
+        .then(r => r.json())
+        .then(data => {
+          spotifyUserId = data.id;
+          log("Spotify user: " + spotifyUserId);
+        });
+      }
+    };
+
+    // ---- scrape Apple Music public playlist ----
+    async function getAppleTracks(url) {
+      log("Fetching Apple Music playlist...");
+      const resp = await fetch(url);
+      const text = await resp.text();
+
+      const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
+      if (!jsonMatch) {
+        log("Could not find playlist JSON. Make sure it's a public playlist URL.");
+        return [];
+      }
+
+      const jsonData = JSON.parse(jsonMatch[1]);
+      const tracks = [];
+      for (const key in jsonData) {
+        const items = jsonData[key].data;
+        if (!items) continue;
+        items.forEach(item => {
+          if (item.type === "songs") {
+            tracks.push({ name: item.attributes.name, artist: item.attributes.artistName });
+          }
+        });
+      }
+      log(`Found ${tracks.length} tracks.`);
+      return tracks;
+    }
+
+    // ---- transfer to Spotify ----
+    async function transferPlaylist() {
+      if (!spotifyToken || !spotifyUserId) {
+        log("Login to Spotify first!");
+        return;
+      }
+
+      const appleUrl = document.getElementById("appleUrl").value.trim();
+      if (!appleUrl) {
+        log("Enter Apple Music playlist URL first.");
+        return;
+      }
+
+      const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
+      const tracks = await getAppleTracks(appleUrl);
+      if (!tracks.length) return;
+
+      // create Spotify playlist
+      const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + spotifyToken, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: playlistName, public: false })
+      });
+      const newPlaylist = await createResp.json();
+      log("Created Spotify playlist: " + newPlaylist.name);
+
+      // search & collect URIs
+      const uris = [];
+      for (const t of tracks) {
+        const query = encodeURIComponent(`${t.name} ${t.artist}`);
+        const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+          headers: { Authorization: "Bearer " + spotifyToken }
+        });
+        const data = await searchResp.json();
+        if (data.tracks.items.length) {
+          uris.push(data.tracks.items[0].uri);
+          log("Matched: " + t.name);
+        } else {
+          log("Not found: " + t.name);
+        }
+      }
+
+      // add in chunks of 100
+      for (let i = 0; i < uris.length; i += 100) {
+        const chunk = uris.slice(i, i + 100);
+        await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+          method: "POST",
+          headers: { Authorization: "Bearer " + spotifyToken, "Content-Type": "application/json" },
+          body: JSON.stringify({ uris: chunk })
+        });
+      }
+
+      log("🎉 Transfer complete!");
+    }
+
+    document.getElementById("transfer").onclick = transferPlaylist;
+  </script>
+</body>
+</html>
