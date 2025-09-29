@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Playlist Ultra-Vacuum Tool</title>
+    <title>Playlist Ultra-Vacuum & Spotify Prep Tool</title>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9; }
         .container { max-width: 800px; margin: 0 auto; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
@@ -11,28 +11,37 @@
         textarea { width: 100%; height: 200px; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; resize: vertical; }
         button { padding: 10px 15px; background-color: #ff2d55; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
         button:hover { background-color: #d82447; }
-        #results { margin-top: 20px; padding: 15px; background-color: #e0f7fa; border-left: 5px solid #00bcd4; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
+        .output-section { margin-top: 20px; padding: 15px; border-radius: 4px; }
+        #results { background-color: #e0f7fa; border-left: 5px solid #00bcd4; }
+        #spotify-list { background-color: #e8f5e9; border-left: 5px solid #4CAF50; margin-top: 15px; }
         #next-url-box { margin-top: 15px; padding: 10px; background-color: #fff3e0; border-left: 5px solid #ff9800; border-radius: 4px; }
         .success { color: #4CAF50; font-weight: bold; }
         .error { color: #f44336; font-weight: bold; }
+        h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; margin-top: 25px; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h1>Playlist Ultra-Vacuum Tool 🎵</h1>
+        <h1>Playlist Ultra-Vacuum & Spotify Prep Tool 🎧</h1>
 
-        <p><strong>1. PASTE JSON & PARSE ALL:</strong> Paste the full JSON response from the playlist tracks API call here. (Look for the one with **`"type": "library-songs"`**)</p>
-        <textarea id="json-input" placeholder="Paste your massive playlist JSON here..."></textarea>
+        <p><strong>1. PASTE JSON & PARSE ALL:</strong> Drop the full JSON response from the playlist tracks API call here.</p>
+        <textarea id="json-input" placeholder="Paste your playlist JSON here..."></textarea>
         
-        <button onclick="parsePlaylist()">Run Parser</button>
+        <button onclick="parsePlaylist()">Run Parser & Prep for Spotify</button>
 
-        <div id="results">
+        <div id="next-url-box">
+            <strong>Next Page URL (for pagination):</strong> <span id="next-url">N/A</span>
+        </div>
+
+        <div class="output-section" id="results">
             Awaiting JSON drop...
         </div>
 
-        <div id="next-url-box">
-            <strong>Next Page URL (if needed):</strong> <span id="next-url">N/A</span>
+        <div class="output-section" id="spotify-list">
+            <h2>Spotify Transfer List (Copy/Paste this into a search tool)</h2>
+            <p>List will appear here after parsing.</p>
+            <textarea id="spotify-output" rows="10" placeholder="Your Spotify-ready list will show up here."></textarea>
         </div>
     </div>
 
@@ -40,51 +49,52 @@
         function parsePlaylist() {
             const jsonInput = document.getElementById('json-input').value;
             const resultsDiv = document.getElementById('results');
+            const spotifyOutputArea = document.getElementById('spotify-output');
             const nextUrlSpan = document.getElementById('next-url');
             
             resultsDiv.innerHTML = 'Parsing... please wait.';
+            spotifyOutputArea.value = '';
             nextUrlSpan.textContent = 'N/A';
 
             if (!jsonInput) {
                 resultsDiv.className = 'error';
-                resultsDiv.innerHTML = 'Uh, you forgot the JSON, babe. 🤨 Paste the data first!';
+                resultsDiv.innerHTML = 'You gotta feed me the data, sweetie. 🙄';
                 return;
             }
 
             try {
                 const json = JSON.parse(jsonInput);
-                
-                // CRITICAL UPDATE: Access the track data directly from the 'data' array
                 const tracks = json.data;
 
                 if (!tracks || tracks.length === 0) {
                     resultsDiv.className = 'error';
-                    resultsDiv.innerHTML = 'The JSON parsed, but I didn\'t find any tracks in the "data" array. Make sure you pasted the *full* playlist tracks JSON!';
+                    resultsDiv.innerHTML = 'JSON parsed, but no tracks found in the "data" array. Did you paste the right stuff?';
                     return;
                 }
 
-                let trackList = [];
+                let detailedTrackList = [];
+                let spotifyTransferList = [];
                 let uniqueTracks = new Set();
                 
-                // Loop through all tracks found in the 'data' array
                 tracks.forEach(track => {
-                    // Check if the track has the necessary attributes
                     if (track.type === 'library-songs' && track.attributes) {
                         const name = track.attributes.name;
                         const artist = track.attributes.artistName;
                         const album = track.attributes.albumName;
                         
-                        // Create a formatted line
-                        const trackInfo = `${name} — ${artist} — ${album}`;
+                        // Use a detailed string for uniqueness check (includes album to be safer)
+                        const uniqueKey = `${name}—${artist}—${album}`;
                         
-                        // Use the combined string for uniqueness check
-                        if (!uniqueTracks.has(trackInfo)) {
-                            uniqueTracks.add(trackInfo);
-                            trackList.push(trackInfo);
+                        if (!uniqueTracks.has(uniqueKey)) {
+                            uniqueTracks.add(uniqueKey);
+                            
+                            // 1. Detailed output for user review
+                            detailedTrackList.push(`${name} — ${artist} — ${album}`);
+                            
+                            // 2. Spotify-ready format for transfer/search tools
+                            // The "Song Name / Artist Name" format is standard for many transfer tools
+                            spotifyTransferList.push(`${name} / ${artist}`); 
                         }
-                    } else {
-                        // Optional: Log tracks that don't match the expected structure
-                        console.warn('Skipping track with unexpected structure:', track);
                     }
                 });
 
@@ -92,31 +102,33 @@
                 const totalTracks = json.meta && json.meta.total ? json.meta.total : 'Unknown';
                 const nextUrl = json.links && json.links.next ? json.links.next : null;
 
-                // Format results for display
-                let output = `Success! Found **${trackList.length}** unique tracks on this page.`;
+                // --- Display Results Section ---
+                let output = `<span class="success">Success!</span> Found **${detailedTrackList.length}** unique tracks on this page.`;
                 if (totalTracks !== 'Unknown') {
-                    output += ` (Total songs in playlist: ${totalTracks})`;
+                    output += `<br>Total songs expected in playlist: **${totalTracks}**`;
                 }
-                output += '\n\n' + trackList.join('\n');
+                output += '<br><br>--- **Tracks Found (Detailed)** ---<br>' + detailedTrackList.join('\n');
 
-                resultsDiv.className = 'success';
+                resultsDiv.className = 'output-section'; // Keep the style simple after initial status
                 resultsDiv.innerHTML = output;
                 
-                // Display the next pagination URL
+                // --- Spotify List Output ---
+                spotifyOutputArea.value = spotifyTransferList.join('\n');
+
+                // --- Next Page Handling ---
                 if (nextUrl) {
                     nextUrlSpan.textContent = nextUrl;
                     nextUrlSpan.style.color = 'blue';
                     nextUrlSpan.style.fontWeight = 'bold';
-                    resultsDiv.innerHTML += `\n\n\n🚨 **PAGINATION ALERT!** 🚨\nThere are more tracks. Copy the **Next Page URL** above, paste it into your browser's address bar (or a tool like Postman), fetch the new JSON, and run the parser again. Repeat until the "Next Page URL" says N/A.`;
+                    resultsDiv.innerHTML += `\n\n\n<p style="color:#ff9800; font-weight:bold;">🚨 PAGINATION ALERT! 🚨 More tracks to grab. Copy the **Next Page URL** above, fetch the new JSON, and run the parser again. Repeat until the URL says N/A.</p>`;
                 } else {
-                    nextUrlSpan.textContent = 'N/A (You got all the tracks on this page!)';
+                    nextUrlSpan.textContent = 'N/A (You snagged all the tracks on this run!)';
                     nextUrlSpan.style.color = 'green';
                 }
 
-
             } catch (e) {
                 resultsDiv.className = 'error';
-                resultsDiv.innerHTML = `Parsing failed, sweetie. You either have invalid JSON, or the structure is different. Check the console for details.\n\nError: ${e.message}`;
+                resultsDiv.innerHTML = `Parsing failed, sweetie. You either have invalid JSON or a data issue. 😭 Error: ${e.message}`;
                 console.error('Parsing error:', e);
             }
         }
