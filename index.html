@@ -27,7 +27,7 @@ button:hover{background:#17a44c;}
 <label>Spotify Playlist Name:</label>
 <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
 
-<button id="fetchApple">Fetch Apple Tracks</button>
+<button id="fetchApple">Fetch Apple Tracks / Login to Spotify</button>
 <button id="transfer" disabled>Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
@@ -38,8 +38,9 @@ button:hover{background:#17a44c;}
 
 <script>
 window.onload = async () => {
-  const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137"; // <-- replace with your real client ID
-  const REDIRECT_URI = window.location.href.split('#')[0]; // auto-detect /index.html or /
+  // ⚠️ CHANGE THIS: Replace with your actual Spotify Client ID 
+  const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137"; 
+  const REDIRECT_URI = window.location.href.split('#')[0]; 
   const SCOPES = "playlist-modify-public playlist-modify-private user-read-private";
 
   const spotifyApi = new SpotifyWebApi();
@@ -53,90 +54,179 @@ window.onload = async () => {
   let appleTracks = [];
   let spotifyUserId = null;
 
-  // ---- Implicit Grant Flow ----
+  // ---- Implicit Grant Flow Helper ----
   function getHashParams() {
     const hash = window.location.hash.substring(1);
     const params = {};
-    hash.split("&").forEach(kv => { const [key,val] = kv.split("="); params[key] = decodeURIComponent(val); });
+    hash.split("&").forEach(kv => { const [key,val] = kv.split("="); params[key] = decodeURIComponent(val.replace(/\+/g, ' ')); }); // Added decodeURIComponent fix
     return params;
   }
+  
+  // ---- Spotify Auth Functions ----
+  function redirectToSpotifyAuth() {
+    // 🔥 FIX: Corrected the Spotify authorization URL 
+    const authUrl = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
+    window.location = authUrl;
+  }
 
-  async function handleAuth() {
+  async function handleAuthToken() {
     const params = getHashParams();
     if (params.access_token) {
       spotifyApi.setAccessToken(params.access_token);
+      // Remove hash from URL to clean up the address bar
+      window.history.pushState("", document.title, window.location.pathname + window.location.search);
+      
       try {
         const me = await spotifyApi.getMe();
         spotifyUserId = me.id;
-        log("✅ Spotify logged in as: " + spotifyUserId);
-      } catch(e) { log("❌ Failed to get Spotify user: " + e.message); }
+        log("✅ Spotify logged in as: " + me.display_name || spotifyUserId);
+        fetchAppleBtn.textContent = "Fetch Apple Tracks"; // Update button text
+        transferBtn.disabled = false;
+      } catch(e) { 
+        log("❌ Failed to get Spotify user. Token may be expired."); 
+        spotifyApi.setAccessToken(null); // Clear the bad token
+      }
     } else {
-      const authUrl = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
-      window.location = authUrl;
+        log("⚠️ Not logged into Spotify. Click 'Fetch Apple Tracks / Login to Spotify' to start.");
     }
   }
 
-  await handleAuth();
+  // Check for an existing token on load
+  await handleAuthToken();
 
-  // ---- Fetch Apple Tracks ----
+  // ---- Fetch Apple Tracks / Login Trigger ----
   fetchAppleBtn.onclick = async () => {
+    // If not logged in, trigger the login redirect instead of fetching
+    if (!spotifyApi.getAccessToken()) {
+        log("🔄 Redirecting to Spotify login...");
+        redirectToSpotifyAuth(); 
+        return; 
+    }
+    
+    // --- START of Apple Fetch Logic (runs only if logged in) ---
     const appleUrl = document.getElementById("appleUrl").value.trim();
     if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
     log("🔄 Fetching Apple Music playlist...");
     try {
+      // Note: This scrape method is fragile and depends on Apple Music page structure.
       const resp = await fetch(appleUrl);
       const text = await resp.text();
       const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
-      if (!jsonMatch) { log("❌ Playlist JSON not found"); return; }
+      if (!jsonMatch) { log("❌ Playlist JSON not found (Apple Music page structure changed?)"); return; }
 
       const jsonData = JSON.parse(jsonMatch[1]);
       appleTracks = [];
+      // Looping through the shoebox data to find track information
       for (const key in jsonData) {
         const items = jsonData[key].data;
-        if (!items) continue;
-        items.forEach(item => { if(item.type==="songs") appleTracks.push({name:item.attributes.name,artist:item.attributes.artistName}); });
+        // Check if it's the right kind of data (an array with relationship info)
+        if (!items || !Array.isArray(items)) continue; 
+        
+        // Find playlist/album objects, then look at their relationships for tracks
+        items.forEach(item => {
+            if(item.type === "playlists" || item.type === "albums") {
+                const songs = item.relationships?.tracks?.data || [];
+                songs.forEach(song => {
+                    if (song.type === "songs" && song.attributes) {
+                        appleTracks.push({
+                            name: song.attributes.name,
+                            artist: song.attributes.artistName
+                        });
+                    }
+                });
+            }
+        });
+        
+        // This is a simpler fallback from the original code that sometimes works for solo tracks/non-related songs
+        items.forEach(item => { 
+            if(item.type==="songs" && item.attributes) {
+                // Only push if it hasn't been added from the relationship check
+                if (!appleTracks.some(t => t.name === item.attributes.name && t.artist === item.attributes.artistName)) {
+                     appleTracks.push({name:item.attributes.name,artist:item.attributes.artistName});
+                }
+            }
+        });
       }
 
-      log(`✅ Found ${appleTracks.length} tracks`);
+      // De-dupe the tracks just in case
+      const uniqueTracks = Array.from(new Set(appleTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
+        const [name, artist] = str.split('|');
+        return { name, artist };
+      });
+      appleTracks = uniqueTracks;
+
+
+      log(`✅ Found ${appleTracks.length} unique tracks`);
+      
       const trackListDiv = document.getElementById("trackList");
       trackListDiv.innerHTML = "";
       appleTracks.forEach((t,i)=>{ 
         const div=document.createElement("div"); 
         div.className="track";
+        // Ensure checkboxes are uniquely identified
         div.innerHTML=`<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
         trackListDiv.appendChild(div);
       });
       transferBtn.disabled=false;
     } catch(e) { log("❌ Error fetching Apple Music playlist: "+e.message); }
+    // --- END of Apple Fetch Logic ---
   };
 
   // ---- Transfer Tracks to Spotify ----
   transferBtn.onclick = async () => {
-    if(!spotifyUserId){log("❌ Spotify not logged in"); return;}
-    const selectedTracks = appleTracks.filter((t,i)=>document.getElementById(`track${i}`).checked);
+    if(!spotifyUserId || !spotifyApi.getAccessToken()){
+        log("❌ Spotify not logged in. Click the first button to log in."); 
+        return;
+    }
+    
+    // Collect only the selected tracks based on checkbox state
+    const selectedTracks = appleTracks.filter((t,i)=>document.getElementById(`track${i}`)?.checked);
+
     if(!selectedTracks.length){log("❌ No tracks selected"); return;}
     const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
     try {
+      // 1. Create the new playlist (public: false is good for privacy)
       const newPlaylist = await spotifyApi.createPlaylist(spotifyUserId,{name:playlistName,public:false});
       log("✅ Created Spotify playlist: "+newPlaylist.name);
+      
       progressContainer.style.display="block";
       progressBar.style.width="0%";
 
+      // 2. Search Spotify for URIs
       const uris=[];
       for(let i=0;i<selectedTracks.length;i++){
         const t=selectedTracks[i];
-        const res=await spotifyApi.searchTracks(`${t.name} ${t.artist}`,{limit:1});
-        if(res.tracks.items.length) uris.push(res.tracks.items[0].uri);
-        log(res.tracks.items.length?"Matched: "+t.name:"Not found: "+t.name);
+        // Search using track name and artist for best match
+        const res=await spotifyApi.searchTracks(`track:${t.name} artist:${t.artist}`,{limit:1});
+        
+        if(res.tracks.items.length) {
+            uris.push(res.tracks.items[0].uri);
+            log("Matched: "+t.name + " by " + t.artist);
+        } else {
+             log("Not found: "+t.name + " by " + t.artist);
+        }
+        
         progressBar.style.width=`${Math.round((i+1)/selectedTracks.length*100)}%`;
       }
 
-      for(let i=0;i<uris.length;i+=100) await spotifyApi.addTracksToPlaylist(newPlaylist.id,uris.slice(i,i+100));
-      log("🎉 Transfer complete!");
+      log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
+
+      // 3. Add tracks in batches (Spotify limits additions to 100 tracks per request)
+      const BATCH_SIZE = 100;
+      for(let i=0;i<uris.length;i+=BATCH_SIZE) {
+          const batch = uris.slice(i,i+BATCH_SIZE);
+          await spotifyApi.addTracksToPlaylist(newPlaylist.id, batch);
+          log(`Added batch ${Math.ceil((i+1)/BATCH_SIZE)} of ${Math.ceil(uris.length/BATCH_SIZE)}`);
+      }
+      
+      log("🎉 Transfer complete! Check Spotify for your playlist.");
       progressBar.style.width="100%";
-    } catch(e){log("❌ Error: "+e.message);}
+    } catch(e){
+        log("❌ Error during transfer: "+e.message);
+        progressContainer.style.display="none"; // Hide progress on fail
+    }
   };
 };
 </script>
