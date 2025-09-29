@@ -16,6 +16,8 @@
   #log { max-height: 200px; overflow-y: auto; background: #222; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; margin-top: 10px; }
   #progressContainer { width: 100%; background: #ddd; height: 20px; border-radius: 10px; margin-top: 10px; display: none; }
   #progressBar { width: 0%; height: 100%; background: #1DB954; border-radius: 10px; transition: width 0.2s; }
+  #tokenHelper { background: #555; }
+  #tokenHelper:hover { background: #444; }
 </style>
 </head>
 <body>
@@ -31,6 +33,7 @@
 <input type="text" id="spotifyTokenInput" placeholder="Paste token here">
 
 <button id="setToken">Set Spotify Token</button>
+<button id="tokenHelper">Get New Token</button>
 <button id="fetchApple">Fetch Apple Tracks</button>
 <button id="transfer" disabled>Transfer Selected Tracks</button>
 
@@ -42,7 +45,7 @@
 
 <pre id="log"></pre>
 
-<!-- Correct Spotify Web API JS library -->
+<!-- Spotify Web API JS library -->
 <script src="https://cdn.jsdelivr.net/npm/spotify-web-api-js@1.5.2/src/spotify-web-api.min.js"></script>
 
 <script>
@@ -60,6 +63,14 @@ window.onload = () => {
   let appleTracks = [];
   let spotifyUserId = null;
 
+  // Token helper
+  document.getElementById("tokenHelper").onclick = () => {
+    window.open(
+      "https://developer.spotify.com/console/get-current-user/?scope=playlist-modify-public%20playlist-modify-private%20user-read-private",
+      "_blank"
+    );
+  };
+
   // Set Spotify token manually
   document.getElementById("setToken").onclick = async () => {
     const token = document.getElementById("spotifyTokenInput").value.trim();
@@ -67,10 +78,12 @@ window.onload = () => {
     spotifyApi.setAccessToken(token);
     try {
       const me = await spotifyApi.getMe();
+      if (!me.id) throw new Error("No user ID returned");
       spotifyUserId = me.id;
       log("✅ Spotify logged in as: " + spotifyUserId);
     } catch (e) {
-      log("❌ Failed to get Spotify user: " + e.message);
+      log("❌ Failed to get Spotify user. Token may be invalid/expired.");
+      spotifyUserId = null;
     }
   };
 
@@ -98,7 +111,6 @@ window.onload = () => {
 
       log(`✅ Found ${appleTracks.length} tracks`);
 
-      // display tracks with checkboxes
       const trackListDiv = document.getElementById("trackList");
       trackListDiv.innerHTML = "";
       appleTracks.forEach((t, i) => {
@@ -116,21 +128,19 @@ window.onload = () => {
 
   // Transfer selected tracks to Spotify
   document.getElementById("transfer").onclick = async () => {
-    if (!spotifyUserId) { log("❌ Set Spotify token first"); return; }
+    if (!spotifyUserId) { log("❌ Set a valid Spotify token first"); return; }
     const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
     if (!selectedTracks.length) { log("❌ No tracks selected"); return; }
 
     const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
     try {
-      // create playlist
       const newPlaylist = await spotifyApi.createPlaylist(spotifyUserId, { name: playlistName, public: false });
       log("✅ Created Spotify playlist: " + newPlaylist.name);
 
       progressContainer.style.display = "block";
       progressBar.style.width = "0%";
 
-      // search & add tracks
       const uris = [];
       for (let i = 0; i < selectedTracks.length; i++) {
         const t = selectedTracks[i];
@@ -144,7 +154,6 @@ window.onload = () => {
         progressBar.style.width = `${Math.round((i+1)/selectedTracks.length*100)}%`;
       }
 
-      // add tracks in chunks of 100
       for (let i = 0; i < uris.length; i += 100) {
         const chunk = uris.slice(i, i + 100);
         await spotifyApi.addTracksToPlaylist(newPlaylist.id, chunk);
