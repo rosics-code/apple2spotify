@@ -34,6 +34,7 @@
 <pre id="log"></pre>
 
 <script>
+// NOTE: Ensure this REDIRECT_URI is set EXACTLY on your Spotify App Dashboard.
 const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
 const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html";
 let spotifyToken = null;
@@ -44,7 +45,6 @@ const log = msg => document.getElementById("log").textContent += msg + "\n";
 
 // PKCE helpers
 function base64urlencode(buffer) {
-  // Ensure buffer is an ArrayBuffer
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
   return btoa(String.fromCharCode.apply(null, bytes))
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -56,11 +56,8 @@ async function sha256(buffer) {
 
 // Generate PKCE code verifier and challenge
 async function generatePKCE() {
-  // Generates a random string (code verifier)
   const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64)))
     .map(c => ('00' + c.toString(16)).slice(-2)).join("");
-  
-  // Calculates the code challenge
   const challenge = base64urlencode(await sha256(verifier));
   return { verifier, challenge };
 }
@@ -73,8 +70,8 @@ document.getElementById("spotifyLogin").onclick = async () => {
   // Added user-read-private scope which is required for the /me endpoint 
   const scopes = "playlist-modify-private playlist-modify-public user-read-private"; 
   
-  // **FIXED** - Correctly construct the authorization URL using URLSearchParams
-  const authUrl = new URL("https://accounts.spotify.com/authorize?client_id=$");
+  // **FIXED ENDPOINT**: Use the real Spotify authorize endpoint
+  const authUrl = new URL("https://accounts.spotify.com/authorize");
   authUrl.searchParams.append('response_type', 'code');
   authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
   authUrl.searchParams.append('scope', scopes);
@@ -98,6 +95,7 @@ async function exchangeCodeForToken(code) {
   });
 
   try {
+    // **FIXED ENDPOINT**: Use the real Spotify token endpoint
     const resp = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -109,6 +107,7 @@ async function exchangeCodeForToken(code) {
     
     if (spotifyToken) {
       // Validate token and get user ID
+      // **FIXED ENDPOINT**: Use the real Spotify /me endpoint
       const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
       if (!userResp.ok) throw new Error("Failed to fetch user data.");
 
@@ -200,6 +199,7 @@ document.getElementById("transfer").onclick = async () => {
 
   try {
     // Create Playlist
+    // **FIXED ENDPOINT**: Use the real Spotify playlists endpoint
     const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
       method: "POST",
       headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
@@ -210,6 +210,7 @@ document.getElementById("transfer").onclick = async () => {
 
     const uris = [];
     // Search for Tracks
+    // **FIXED ENDPOINT**: Use the real Spotify search endpoint
     for (const t of selectedTracks) {
       const query = encodeURIComponent(`${t.name} ${t.artist}`);
       const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: `Bearer ${spotifyToken}` } });
@@ -225,6 +226,7 @@ document.getElementById("transfer").onclick = async () => {
     log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
 
     // Add Tracks in Batches
+    // **FIXED ENDPOINT**: Use the real Spotify add tracks endpoint
     for (let i = 0; i < uris.length; i += 100) {
       const chunk = uris.slice(i, i + 100);
       await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
