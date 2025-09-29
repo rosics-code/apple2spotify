@@ -16,7 +16,7 @@
 <body>
 <h1>Apple Music → Spotify Transfer</h1>
 
-<p><strong>🚨 CRITICAL STEP: The proxy is broken.</strong> You must manually paste the playlist HTML source.</p>
+<p><strong>✨ Pure JSON Mode:</strong> Since the proxy failed, paste the raw API **JSON response** below.</p>
 
 <label>
   Spotify Playlist Name:
@@ -24,7 +24,7 @@
 </label>
 
 <button id="spotifyLogin">Login to Spotify</button>
-<button id="fetchApple">1. Get Apple Playlist HTML Source & Parse</button>
+<button id="fetchApple">1. Get Apple Playlist JSON & Parse</button>
 <button id="transfer" disabled>2. Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
@@ -158,62 +158,34 @@ window.onload = () => {
     }
 };
 
-// Fetch Apple Music tracks - FINAL MANUAL PASTE FIX
+// Fetch Apple Music tracks - FINAL JSON PARSING FIX
 document.getElementById("fetchApple").onclick = async () => {
-    // 🌟 REMOVED URL INPUT AND PROXY LOGIC
-    const text = prompt(
-        "PASTE APPLE MUSIC PLAYLIST HTML SOURCE HERE:\n\n1. Go to your Apple Music playlist link.\n2. In your browser, Right-Click -> View Page Source (or Inspect Element, then click 'Elements' tab, right-click <html>, then 'Copy' -> 'Copy outerHTML').\n3. Paste the ENTIRE source code below."
+    // 🌟 MANUAL PASTE PROMPT - CLEAR INSTRUCTIONS FOR JSON
+    const rawJsonString = prompt(
+        "PASTE RAW APPLE MUSIC API JSON RESPONSE HERE:\n\n1. Go to your Apple Music playlist (or the URL you found).\n2. Open Dev Tools (F12) -> Network tab.\n3. Refresh the page.\n4. Find the API request that returns the JSON (Filter by 'playlist' or the full URL).\n5. Copy the ENTIRE JSON response (usually by right-clicking the response and selecting 'Copy Value' or 'Copy Response').\n6. Paste it below."
     );
 
-    if (!text) { 
-        log("❌ Action cancelled. Please paste the source code to proceed."); 
+    if (!rawJsonString) { 
+        log("❌ Action cancelled. Please paste the JSON data to proceed."); 
         return; 
     }
     
-    log("✅ HTML source received. Parsing data...");
+    log("✅ JSON received. Parsing data...");
 
     try {
-        let jsonData = null;
+        let jsonData;
         
-        // 1. Get ALL script tags' content
-        const scriptMatches = [...text.matchAll(/<script[^>]*>([\s\S]+?)<\/script>/g)];
-        let rawJsonText = null;
-
-        for (const match of scriptMatches) {
-            const content = match[1];
-            // Check for the unique strings that signify the main data payload
-            if (content.includes('"type":"playlists"') && content.includes('"relationships":')) {
-                rawJsonText = content;
-                break;
-            }
-        }
-
-        if (rawJsonText) {
-            // 2. Isolate the JSON object from the surrounding JS code
-            let start = rawJsonText.indexOf('{');
-            let end = rawJsonText.lastIndexOf('}');
-            
-            if (start !== -1 && end !== -1 && end > start) {
-                let cleanJsonText = rawJsonText.substring(start, end + 1).trim();
-                if (cleanJsonText.endsWith(';')) cleanJsonText = cleanJsonText.slice(0, -1);
-                
-                try {
-                    jsonData = JSON.parse(cleanJsonText);
-                } catch (e) {
-                    log(`❌ Error parsing isolated JSON. Is the source complete? ${e.message}`);
-                    return;
-                }
-            }
-        }
-        
-        if (!jsonData) {
-            log("❌ Playlist data not found in HTML source. The scraping logic failed on the pasted content. Ensure it's a public, non-dynamic playlist.");
+        // 🌟 NEW STEP: DIRECTLY PARSE THE RAW JSON STRING
+        try {
+            jsonData = JSON.parse(rawJsonString);
+        } catch (e) {
+            log(`❌ Error: Failed to parse the pasted content as JSON. Did you copy the whole response? ${e.message}`);
             return;
         }
 
         let tempTracks = [];
         
-        // 3. Recursive function to dive into the complex JSON structure and pull out songs.
+        // 3. Recursive function to dive into the JSON structure and pull out songs.
         const extractTracks = (data) => {
             if (!data || typeof data !== 'object') return;
 
@@ -222,11 +194,13 @@ document.getElementById("fetchApple").onclick = async () => {
                 return;
             }
             
+            // Handle the 'data' array wrapper common in API responses
             if (data.data) {
                 extractTracks(data.data);
                 return;
             }
 
+            // Target the playlist tracks structure
             if ((data.type === "playlists" || data.type === "albums") && data.relationships && data.relationships.tracks && data.relationships.tracks.data) {
                 data.relationships.tracks.data.forEach(song => {
                     if (song.type === "songs" && song.attributes) {
@@ -234,26 +208,25 @@ document.getElementById("fetchApple").onclick = async () => {
                     }
                 });
             }
-
+            // Target the direct song objects
             if (data.type === "songs" && data.attributes) {
                 tempTracks.push({name: data.attributes.name, artist: data.attributes.artistName});
             }
         };
 
-        // 4. Start extraction
-        if (jsonData && typeof jsonData === 'object' && !jsonData.data) {
-            for (const key in jsonData) {
-                extractTracks(jsonData[key]);
-            }
-        } else {
-            extractTracks(jsonData);
-        }
+        // 4. Start extraction from the top level
+        extractTracks(jsonData);
 
         // De-dupe the tracks
         appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
             const [name, artist] = str.split('|');
             return { name, artist };
         });
+
+        if (appleTracks.length === 0) {
+            log("❌ Zero tracks found. The JSON structure must be slightly different than expected. Try finding a different API response in the Network tab.");
+            return;
+        }
 
         log(`✅ Found ${appleTracks.length} unique tracks! Ready for transfer.`);
 
@@ -268,7 +241,7 @@ document.getElementById("fetchApple").onclick = async () => {
 
         document.getElementById("transfer").disabled = !spotifyToken;
     } catch(e) {
-        log(`❌ Error during parsing: ${e.message}. The source code structure may have changed entirely.`);
+        log(`❌ A major error occurred during parsing: ${e.message}`);
     }
 };
 
