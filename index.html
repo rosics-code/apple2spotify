@@ -13,6 +13,7 @@ button:hover{background:#17a44c;}
 #trackList{max-height:350px; overflow-y:auto; border:1px solid #ccc; padding:10px; border-radius:5px; background:white; margin-top:10px;}
 .track{display:flex; align-items:center; margin-bottom:5px;}
 .track label{flex:1; cursor:pointer;}
+
 /* UI Status Indicator Style */
 #spotifyStatus{
     margin-top: -10px; 
@@ -52,7 +53,7 @@ button:hover{background:#17a44c;}
 
 <script>
 window.onload = async () => {
-  // ⚠️ CHANGE THIS: Replace with your actual Spotify Client ID 
+  // ⚠️ REMINDER: Replace this with your actual Spotify Client ID 
   const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137"; 
   const REDIRECT_URI = window.location.href.split('#')[0]; 
   const SCOPES = "playlist-modify-public playlist-modify-private user-read-private";
@@ -63,7 +64,7 @@ window.onload = async () => {
   const progressBar = document.getElementById("progressBar");
   const fetchAppleBtn = document.getElementById("fetchApple");
   const transferBtn = document.getElementById("transfer");
-  const statusEl = document.getElementById("spotifyStatus"); // New Status Element
+  const statusEl = document.getElementById("spotifyStatus"); 
 
   const log = msg => { logEl.textContent += msg + "\n"; logEl.scrollTop = logEl.scrollHeight; };
   let appleTracks = [];
@@ -73,13 +74,24 @@ window.onload = async () => {
   function getHashParams() {
     const hash = window.location.hash.substring(1);
     const params = {};
-    hash.split("&").forEach(kv => { const [key,val] = kv.split("="); params[key] = decodeURIComponent(val.replace(/\+/g, ' ')); });
+    
+    // 🔥 FIX: Added check to prevent "Cannot read properties of undefined (reading 'replace')"
+    if (hash) { 
+        hash.split("&").forEach(kv => { 
+            const [key,val] = kv.split("="); 
+            
+            // Only process the value if it exists
+            if (val !== undefined) { 
+                params[key] = decodeURIComponent(val.replace(/\+/g, ' ')); 
+            }
+        });
+    }
     return params;
   }
   
   // ---- Spotify Auth Functions ----
   function redirectToSpotifyAuth() {
-    // 🔥 FIX: Corrected the Spotify authorization URL and Client ID insertion
+    // ✅ CORRECT URL: This is the correct base endpoint
     const authUrl = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
     window.location = authUrl;
   }
@@ -103,7 +115,7 @@ window.onload = async () => {
         transferBtn.disabled = false;
 
       } catch(e) { 
-        log("❌ Failed to get Spotify user. Token may be expired."); 
+        log("❌ Failed to get Spotify user. Token may be expired. Try logging in again."); 
         spotifyApi.setAccessToken(null); // Clear the bad token
         
         // ✨ UI Update for failure
@@ -111,14 +123,14 @@ window.onload = async () => {
         statusEl.className = "status-logged-out";
       }
     } else {
-        // ✨ UI Update for default state
+        // ✨ UI Update for default state (No auto-redirect)
         log("⚠️ Not logged into Spotify. Click 'Fetch Apple Tracks' to authorize/login first.");
         statusEl.textContent = "Spotify: Click 'Fetch' to Log In";
         statusEl.className = "status-logged-out";
     }
   }
 
-  // Check for an existing token on load (but DO NOT redirect)
+  // Check for an existing token on load
   await handleAuthToken();
 
   // ---- Fetch Apple Tracks / Login Trigger ----
@@ -136,15 +148,18 @@ window.onload = async () => {
 
     log("🔄 Fetching Apple Music playlist...");
     try {
+      // NOTE: This scraping method is fragile as Apple can change its page structure.
       const resp = await fetch(appleUrl);
       const text = await resp.text();
       const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
-      if (!jsonMatch) { log("❌ Playlist JSON not found (Apple Music page structure changed?)"); return; }
+      if (!jsonMatch) { 
+        log("❌ Playlist data not found. Apple Music page structure may have changed."); 
+        return; 
+      }
 
       const jsonData = JSON.parse(jsonMatch[1]);
       let tempTracks = [];
       
-      // Scrape Logic (kept the previous logic that looks for songs in relationships/directly)
       for (const key in jsonData) {
         const items = jsonData[key].data;
         if (!items || !Array.isArray(items)) continue; 
@@ -197,7 +212,6 @@ window.onload = async () => {
         return;
     }
     
-    // Collect only the selected tracks based on checkbox state
     const selectedTracks = appleTracks.filter((t,i)=>document.getElementById(`track${i}`)?.checked);
 
     if(!selectedTracks.length){log("❌ No tracks selected"); return;}
