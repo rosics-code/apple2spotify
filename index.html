@@ -70,7 +70,7 @@ document.getElementById("spotifyLogin").onclick = async () => {
   // Added user-read-private scope which is required for the /me endpoint 
   const scopes = "playlist-modify-private playlist-modify-public user-read-private"; 
   
-  // **FIXED ENDPOINT**: Use the real Spotify authorize endpoint
+  // FIXED ENDPOINT: Use the real Spotify authorize endpoint
   const authUrl = new URL("https://accounts.spotify.com/authorize");
   authUrl.searchParams.append('response_type', 'code');
   authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
@@ -95,7 +95,7 @@ async function exchangeCodeForToken(code) {
   });
 
   try {
-    // **FIXED ENDPOINT**: Use the real Spotify token endpoint
+    // FIXED ENDPOINT: Use the real Spotify token endpoint
     const resp = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -107,7 +107,7 @@ async function exchangeCodeForToken(code) {
     
     if (spotifyToken) {
       // Validate token and get user ID
-      // **FIXED ENDPOINT**: Use the real Spotify /me endpoint
+      // FIXED ENDPOINT: Use the real Spotify /me endpoint
       const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
       if (!userResp.ok) throw new Error("Failed to fetch user data.");
 
@@ -133,63 +133,75 @@ window.onload = () => {
   }
 };
 
-// Fetch Apple Music tracks (from the previously working logic)
+// Fetch Apple Music tracks - CORS FIX APPLIED HERE
 document.getElementById("fetchApple").onclick = async () => {
-  const appleUrl = document.getElementById("appleUrl").value.trim();
-  if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
+    const appleUrl = document.getElementById("appleUrl").value.trim();
+    if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
-  log("🔄 Fetching Apple Music playlist...");
-  try {
-    const resp = await fetch(appleUrl);
-    const text = await resp.text();
-    const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
-    if (!jsonMatch) { log("❌ Playlist JSON not found"); return; }
-    
-    const jsonData = JSON.parse(jsonMatch[1]);
-    let tempTracks = []; 
-    
-    for (const key in jsonData) {
-      const items = jsonData[key].data;
-      if (!items) continue;
-      items.forEach(item => {
-          if(item.type === "playlists" || item.type === "albums") {
-              const songs = item.relationships?.tracks?.data || [];
-              songs.forEach(song => {
-                  if (song.type === "songs" && song.attributes) {
-                      tempTracks.push({name: song.attributes.name, artist: song.attributes.artistName});
-                  }
-              });
-          }
-          if (item.type === "songs" && item.attributes) {
-              tempTracks.push({name: item.attributes.name, artist: item.attributes.artistName});
-          }
-      });
-    }
+    log("🔄 Bypassing CORS to fetch Apple Music playlist...");
 
-    // De-dupe the tracks
-    appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
-      const [name, artist] = str.split('|');
-      return { name, artist };
-    });
+    // THE FIX: Use a public CORS proxy to fetch the Apple URL
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(appleUrl)}`;
 
-    log(`✅ Found ${appleTracks.length} unique tracks`);
+    try {
+        // Fetch the data via the proxy
+        const proxyResp = await fetch(proxyUrl);
+        const proxyData = await proxyResp.json();
+        
+        // The actual HTML content is inside the 'contents' property from the proxy
+        const text = proxyData.contents; 
+        
+        const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
+        if (!jsonMatch) { 
+            log("❌ Playlist JSON not found. Are you sure the URL is public and correct?"); 
+            return; 
+        }
+        
+        const jsonData = JSON.parse(jsonMatch[1]);
+        let tempTracks = []; 
+        
+        for (const key in jsonData) {
+            const items = jsonData[key].data;
+            if (!items) continue;
+            items.forEach(item => {
+                if(item.type === "playlists" || item.type === "albums") {
+                    const songs = item.relationships?.tracks?.data || [];
+                    songs.forEach(song => {
+                        if (song.type === "songs" && song.attributes) {
+                            tempTracks.push({name: song.attributes.name, artist: song.attributes.artistName});
+                        }
+                    });
+                }
+                if (item.type === "songs" && item.attributes) {
+                    tempTracks.push({name: item.attributes.name, artist: item.attributes.artistName});
+                }
+            });
+        }
 
-    const trackListDiv = document.getElementById("trackList");
-    trackListDiv.innerHTML = "";
-    appleTracks.forEach((t, i) => {
-      const div = document.createElement("div");
-      div.className = "track";
-      div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
-      trackListDiv.appendChild(div);
-    });
+        // De-dupe the tracks
+        appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
+            const [name, artist] = str.split('|');
+            return { name, artist };
+        });
 
-    document.getElementById("transfer").disabled = false;
-  } catch(e) {
-    log("❌ Error fetching Apple Music playlist: " + e.message);
-  }
+        log(`✅ Found ${appleTracks.length} unique tracks! Ready for transfer.`);
+
+        const trackListDiv = document.getElementById("trackList");
+        trackListDiv.innerHTML = "";
+        appleTracks.forEach((t, i) => {
+            const div = document.createElement("div");
+            div.className = "track";
+            div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
+            trackListDiv.appendChild(div);
+        });
+
+        document.getElementById("transfer").disabled = false;
+    } catch(e) {
+        log(`❌ Error fetching Apple Music playlist: ${e.message}. Double-check the URL!`);
+    }
 };
 
-// Transfer selected tracks to Spotify (same as before)
+// Transfer selected tracks to Spotify 
 document.getElementById("transfer").onclick = async () => {
   if (!spotifyToken || !spotifyUserId) { log("❌ Login to Spotify first!"); return; }
   const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
@@ -199,7 +211,7 @@ document.getElementById("transfer").onclick = async () => {
 
   try {
     // Create Playlist
-    // **FIXED ENDPOINT**: Use the real Spotify playlists endpoint
+    // FIXED ENDPOINT: Use the real Spotify playlists endpoint
     const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
       method: "POST",
       headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
@@ -210,7 +222,7 @@ document.getElementById("transfer").onclick = async () => {
 
     const uris = [];
     // Search for Tracks
-    // **FIXED ENDPOINT**: Use the real Spotify search endpoint
+    // FIXED ENDPOINT: Use the real Spotify search endpoint
     for (const t of selectedTracks) {
       const query = encodeURIComponent(`${t.name} ${t.artist}`);
       const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: `Bearer ${spotifyToken}` } });
@@ -226,7 +238,7 @@ document.getElementById("transfer").onclick = async () => {
     log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
 
     // Add Tracks in Batches
-    // **FIXED ENDPOINT**: Use the real Spotify add tracks endpoint
+    // FIXED ENDPOINT: Use the real Spotify add tracks endpoint
     for (let i = 0; i < uris.length; i += 100) {
       const chunk = uris.slice(i, i + 100);
       await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
