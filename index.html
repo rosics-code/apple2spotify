@@ -1,357 +1,126 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Apple2Spotify</title>
-<style>
-  body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }
-  h1 { text-align: center; }
-  input[type=text] { width: 100%; padding: 8px; margin: 5px 0; }
-  button { padding: 10px 15px; margin: 5px 0; }
-  #trackList { max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-top: 10px; }
-  .track { display: flex; align-items: center; margin-bottom: 5px; }
-  .track label { flex: 1; cursor: pointer; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playlist Ultra-Vacuum Tool</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9; }
+        .container { max-width: 800px; margin: 0 auto; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+        h1 { color: #333; text-align: center; margin-bottom: 20px; }
+        textarea { width: 100%; height: 200px; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; resize: vertical; }
+        button { padding: 10px 15px; background-color: #ff2d55; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
+        button:hover { background-color: #d82447; }
+        #results { margin-top: 20px; padding: 15px; background-color: #e0f7fa; border-left: 5px solid #00bcd4; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
+        #next-url-box { margin-top: 15px; padding: 10px; background-color: #fff3e0; border-left: 5px solid #ff9800; border-radius: 4px; }
+        .success { color: #4CAF50; font-weight: bold; }
+        .error { color: #f44336; font-weight: bold; }
+    </style>
 </head>
 <body>
-<h1>Apple Music → Spotify Transfer (ULTRA-VACUUM MODE)</h1>
 
-<p><strong>✨ THE ONE:</strong> This script will search the **entire JSON** you paste for *any* song or artist data. Find the **biggest** playlist JSON and paste it once.</p>
+    <div class="container">
+        <h1>Playlist Ultra-Vacuum Tool 🎵</h1>
 
-<label>
-  Spotify Playlist Name:
-  <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
-</label>
-
-<button id="spotifyLogin">Login to Spotify</button>
-<button id="fetchApple">1. PASTE JSON & PARSE ALL</button>
-<button id="transfer" disabled>2. Transfer Selected Tracks</button>
-
-<div id="trackList"></div>
-<pre id="log"></pre>
-
-<script>
-// NOTE: Ensure this REDIRECT_URI is set EXACTLY on your Spotify App Dashboard.
-const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
-const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html";
-let spotifyToken = localStorage.getItem("spotify_access_token");
-let spotifyUserId = null;
-let appleTracks = [];
-
-const log = msg => document.getElementById("log").textContent += msg + "\n";
-const clearLog = () => document.getElementById("log").textContent = "";
-
-// Helper to update the UI after login (Untouched)
-const updateLoginUI = (isLoggedIn, userName) => {
-    const loginButton = document.getElementById("spotifyLogin");
-    if (isLoggedIn) {
-        loginButton.style.display = 'none';
-        log(`✅ Spotify logged in as: ${userName || 'User'}`);
-        document.getElementById("transfer").disabled = false;
-    } else {
-        loginButton.style.display = 'block';
-        document.getElementById("transfer").disabled = true;
-    }
-};
-
-// PKCE/Spotify Auth functions (FIXED Uint8Array)
-function base64urlencode(buffer) {
-  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
-  return btoa(String.fromCharCode.apply(null, bytes))
-    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function sha256(buffer) {
-  return await crypto.subtle.digest("SHA-256", new TextEncoder().encode(buffer));
-}
-
-async function generatePKCE() {
-  // 🚨 FIXED: Corrected Uint8array to Uint8Array
-  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64))) 
-    .map(c => ('00' + c.toString(16)).slice(-2)).join("");
-  const challenge = base64urlencode(await sha256(verifier));
-  return { verifier, challenge };
-}
-
-document.getElementById("spotifyLogin").onclick = async () => {
-  const { verifier, challenge } = await generatePKCE();
-  sessionStorage.setItem("pkce_verifier", verifier);
-
-  const scopes = "playlist-modify-private playlist-modify-public user-read-private"; 
-  
-  const authUrl = new URL("https://accounts.spotify.com/authorize"); 
-  authUrl.searchParams.append('response_type', 'code');
-  authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
-  authUrl.searchParams.append('scope', scopes);
-  authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
-  authUrl.searchParams.append('code_challenge_method', 'S256');
-  authUrl.searchParams.append('code_challenge', challenge);
-  
-  window.location.href = authUrl.toString();
-};
-
-async function exchangeCodeForToken(code) {
-  const verifier = sessionStorage.getItem("pkce_verifier");
-  
-  const body = new URLSearchParams({
-    client_id: SPOTIFY_CLIENT_ID,
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: REDIRECT_URI,
-    code_verifier: verifier
-  });
-
-  try {
-    const resp = await fetch("https://accounts.spotify.com/api/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString()
-    });
-    
-    const data = await resp.json();
-    spotifyToken = data.access_token;
-    
-    if (spotifyToken) {
-        localStorage.setItem("spotify_access_token", spotifyToken);
-      const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
-      if (!userResp.ok) throw new Error("Failed to fetch user data.");
-
-      const userData = await userResp.json();
-      spotifyUserId = userData.id;
-      updateLoginUI(true, userData.display_name || spotifyUserId);
-    } else {
-      log("❌ Failed to get access token: " + (data.error_description || data.error || "Unknown error"));
-    }
-  } catch (e) {
-    log(`❌ Token Exchange Error: ${e.message}`);
-  }
-}
-
-async function checkStoredToken() {
-    if (spotifyToken) {
-        try {
-            const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
-            if (userResp.ok) {
-                const userData = await userResp.json();
-                spotifyUserId = userData.id;
-                updateLoginUI(true, userData.display_name || spotifyUserId);
-                return;
-            } else {
-                localStorage.removeItem("spotify_access_token");
-                spotifyToken = null;
-            }
-        } catch (e) {
-            log(`❌ Stored Token Check Failed: ${e.message}`);
-            localStorage.removeItem("spotify_access_token");
-            spotifyToken = null;
-        }
-    }
-    updateLoginUI(false);
-}
-
-window.onload = () => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const code = urlParams.get("code");
-  if (code) {
-    window.history.replaceState({}, document.title, REDIRECT_URI);
-    exchangeCodeForToken(code);
-  } else {
-        checkStoredToken();
-    }
-};
-
-
-// CORE AGGRESSIVE PARSING LOGIC
-const parseAppleJson = (rawJsonString) => {
-    
-    clearLog();
-    log("Processing JSON data with the Ultra-Vacuum parser...");
-
-    try {
-        let jsonData;
-        try {
-            jsonData = JSON.parse(rawJsonString);
-        } catch (e) {
-            log(`❌ Error: Failed to parse the pasted content as JSON. Did you copy the whole response? ${e.message}`);
-            return false;
-        }
+        <p><strong>1. PASTE JSON & PARSE ALL:</strong> Paste the full JSON response from the playlist tracks API call here. (Look for the one with **`"type": "library-songs"`**)</p>
+        <textarea id="json-input" placeholder="Paste your massive playlist JSON here..."></textarea>
         
-        // Global maps to store unique song and artist data found anywhere
-        const allArtists = {};
-        const allSongs = {};
-        const trackReferences = [];
+        <button onclick="parsePlaylist()">Run Parser</button>
 
-        // Recursive function to search EVERYTHING for songs, artists, and references
-        const aggressiveSearch = (data) => {
-            if (!data || typeof data !== 'object') return;
+        <div id="results">
+            Awaiting JSON drop...
+        </div>
+
+        <div id="next-url-box">
+            <strong>Next Page URL (if needed):</strong> <span id="next-url">N/A</span>
+        </div>
+    </div>
+
+    <script>
+        function parsePlaylist() {
+            const jsonInput = document.getElementById('json-input').value;
+            const resultsDiv = document.getElementById('results');
+            const nextUrlSpan = document.getElementById('next-url');
             
-            // Handle arrays (recursion)
-            if (Array.isArray(data)) {
-                data.forEach(item => aggressiveSearch(item));
+            resultsDiv.innerHTML = 'Parsing... please wait.';
+            nextUrlSpan.textContent = 'N/A';
+
+            if (!jsonInput) {
+                resultsDiv.className = 'error';
+                resultsDiv.innerHTML = 'Uh, you forgot the JSON, babe. 🤨 Paste the data first!';
                 return;
             }
 
-            // --- 1. Identify and Store Full Song/Artist Data ---
-            if (data.type === 'artists' && data.attributes && data.attributes.name) {
-                // Store artist name by ID
-                allArtists[data.id] = data.attributes.name;
-            } else if ((data.type === 'songs' || data.type === 'music-videos') && data.attributes) {
-                // Store full song details by ID if it has a name
-                if (data.attributes.name) {
-                    allSongs[data.id] = {
-                        name: data.attributes.name,
-                        // Get artist ID reference, often found in relationships
-                        artistData: data.relationships && data.relationships.artists ? data.relationships.artists.data : null
-                    };
-                }
+            try {
+                const json = JSON.parse(jsonInput);
                 
-                // If this is a song object without full attributes, it might be a reference
-                // We let it fall through to the next check just in case.
-            }
-            
-            // --- 2. Identify and Store Playlist Track References ---
-            // If it's a song/music-video type, it's a reference to a track, even if it's nested
-            if ((data.type === 'songs' || data.type === 'music-videos') && data.id) {
-                 if (!trackReferences.find(r => r.id === data.id)) {
-                    trackReferences.push({id: data.id, type: data.type});
-                }
-            }
+                // CRITICAL UPDATE: Access the track data directly from the 'data' array
+                const tracks = json.data;
 
-            // If it contains a relationships.tracks.data array, grab those references too
-             if (data.relationships && data.relationships.tracks && Array.isArray(data.relationships.tracks.data)) {
-                 data.relationships.tracks.data.forEach(ref => {
-                     if ((ref.type === 'songs' || ref.type === 'music-videos') && !trackReferences.find(r => r.id === ref.id)) {
-                        trackReferences.push(ref);
+                if (!tracks || tracks.length === 0) {
+                    resultsDiv.className = 'error';
+                    resultsDiv.innerHTML = 'The JSON parsed, but I didn\'t find any tracks in the "data" array. Make sure you pasted the *full* playlist tracks JSON!';
+                    return;
+                }
+
+                let trackList = [];
+                let uniqueTracks = new Set();
+                
+                // Loop through all tracks found in the 'data' array
+                tracks.forEach(track => {
+                    // Check if the track has the necessary attributes
+                    if (track.type === 'library-songs' && track.attributes) {
+                        const name = track.attributes.name;
+                        const artist = track.attributes.artistName;
+                        const album = track.attributes.albumName;
+                        
+                        // Create a formatted line
+                        const trackInfo = `${name} — ${artist} — ${album}`;
+                        
+                        // Use the combined string for uniqueness check
+                        if (!uniqueTracks.has(trackInfo)) {
+                            uniqueTracks.add(trackInfo);
+                            trackList.push(trackInfo);
+                        }
+                    } else {
+                        // Optional: Log tracks that don't match the expected structure
+                        console.warn('Skipping track with unexpected structure:', track);
                     }
-                 });
-             }
+                });
 
-            // --- 3. Recurse through all object properties (Deep Dive) ---
-            for (const key in data) {
-                 if (typeof data[key] === 'object' && key !== 'attributes') { // Avoid deep diving into simple attribute lists
-                    aggressiveSearch(data[key]);
+                // Check for pagination link
+                const totalTracks = json.meta && json.meta.total ? json.meta.total : 'Unknown';
+                const nextUrl = json.links && json.links.next ? json.links.next : null;
+
+                // Format results for display
+                let output = `Success! Found **${trackList.length}** unique tracks on this page.`;
+                if (totalTracks !== 'Unknown') {
+                    output += ` (Total songs in playlist: ${totalTracks})`;
                 }
-            }
-        };
+                output += '\n\n' + trackList.join('\n');
 
-        // Start the search from the top level
-        aggressiveSearch(jsonData);
-        
-        log(`🔍 Found ${Object.keys(allArtists).length} unique artists.`);
-        log(`🔍 Found ${Object.keys(allSongs).length} unique full songs (with names).`);
-        log(`🔍 Found ${trackReferences.length} track ID references.`);
-        
-        
-        // ===============================================
-        // FINAL PASS: Combine references and song data
-        // ===============================================
-        let tempTracks = [];
-
-        trackReferences.forEach(trackRef => {
-            const songData = allSongs[trackRef.id];
-            
-            if (songData) {
-                let primaryArtistName = 'Unknown Artist';
+                resultsDiv.className = 'success';
+                resultsDiv.innerHTML = output;
                 
-                // Get the artist ID from the song data's relationships
-                if (songData.artistData && songData.artistData.length > 0) {
-                    const primaryArtistId = songData.artistData[0].id;
-                    primaryArtistName = allArtists[primaryArtistId] || primaryArtistName;
+                // Display the next pagination URL
+                if (nextUrl) {
+                    nextUrlSpan.textContent = nextUrl;
+                    nextUrlSpan.style.color = 'blue';
+                    nextUrlSpan.style.fontWeight = 'bold';
+                    resultsDiv.innerHTML += `\n\n\n🚨 **PAGINATION ALERT!** 🚨\nThere are more tracks. Copy the **Next Page URL** above, paste it into your browser's address bar (or a tool like Postman), fetch the new JSON, and run the parser again. Repeat until the "Next Page URL" says N/A.`;
+                } else {
+                    nextUrlSpan.textContent = 'N/A (You got all the tracks on this page!)';
+                    nextUrlSpan.style.color = 'green';
                 }
-                
-                const name = songData.name;
-                const artist = primaryArtistName;
 
-                if (name && name !== 'undefined' && artist !== 'Unknown Artist') {
-                    tempTracks.push({name, artist});
-                }
+
+            } catch (e) {
+                resultsDiv.className = 'error';
+                resultsDiv.innerHTML = `Parsing failed, sweetie. You either have invalid JSON, or the structure is different. Check the console for details.\n\nError: ${e.message}`;
+                console.error('Parsing error:', e);
             }
-        });
-
-        // De-dupe the tracks
-        appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
-            const [name, artist] = str.split('|');
-            return { name, artist };
-        });
-
-        if (appleTracks.length === 0) {
-            log("❌ Zero unique, valid tracks found after combining data. Ensure you pasted the main playlist JSON response.");
-            return true; // Still report true so we don't block
         }
+    </script>
 
-        log(`\n🎉 Success! Found ${appleTracks.length} unique tracks! Ready for transfer.`);
-
-        const trackListDiv = document.getElementById("trackList");
-        trackListDiv.innerHTML = "";
-        appleTracks.forEach((t, i) => {
-            const div = document.createElement("div");
-            div.className = "track";
-            div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
-            trackListDiv.appendChild(div);
-        });
-
-        document.getElementById("transfer").disabled = !spotifyToken;
-        return true; 
-    } catch(e) {
-        log(`❌ A major error occurred during parsing: ${e.message}`);
-        return false;
-    }
-};
-
-// Event handler for the single paste button
-document.getElementById("fetchApple").onclick = () => {
-    const rawJsonString = prompt("PASTE THE ENTIRE JSON RESPONSE HERE. Choose the largest file from the Network tab that contains your playlist's track list.");
-    if (!rawJsonString) { return; }
-    
-    parseAppleJson(rawJsonString);
-};
-
-
-// Transfer selected tracks to Spotify (Untouched)
-document.getElementById("transfer").onclick = async () => {
-  if (!spotifyToken || !spotifyUserId) { log("❌ Login to Spotify first!"); return; }
-  const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
-  if (!selectedTracks.length) { log("❌ No tracks selected"); return; }
-
-  const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
-
-  try {
-    const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: playlistName, public: false })
-    });
-    const newPlaylist = await createResp.json();
-    log("✅ Created Spotify playlist: " + newPlaylist.name);
-
-    const uris = [];
-    for (const t of selectedTracks) {
-      const query = encodeURIComponent(`track:${t.name} artist:${t.artist}`);
-      const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: "Bearer " + spotifyToken } });
-      const data = await searchResp.json();
-      if (data.tracks.items.length) {
-        uris.push(data.tracks.items[0].uri);
-        log("Matched: " + t.name);
-      } else {
-        log("Not found: " + t.name);
-      }
-    }
-
-    log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
-
-    for (let i = 0; i < uris.length; i += 100) {
-      const chunk = uris.slice(i, i + 100);
-      await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ uris: chunk })
-      });
-    }
-    log("🎉 Transfer complete! Check Spotify.");
-  } catch (e) {
-    log("❌ Error during transfer: " + e.message);
-  }
-};
-</script>
 </body>
 </html>
