@@ -133,24 +133,27 @@ window.onload = () => {
   }
 };
 
-// Fetch Apple Music tracks - CORS FIX APPLIED HERE
+// Fetch Apple Music tracks - NEW CORS PROXY APPLIED HERE
 document.getElementById("fetchApple").onclick = async () => {
     const appleUrl = document.getElementById("appleUrl").value.trim();
     if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
 
-    log("🔄 Bypassing CORS to fetch Apple Music playlist...");
+    log("🔄 Bypassing CORS with a new proxy to fetch Apple Music playlist...");
 
-    // THE FIX: Use a public CORS proxy to fetch the Apple URL
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(appleUrl)}`;
+    // 🌟 THE NEW FIX: Use a different public CORS proxy URL
+    const proxyUrl = `http://googleusercontent.com/corsproxy.io/get?url=${encodeURIComponent(appleUrl)}`;
 
     try {
         // Fetch the data via the proxy
         const proxyResp = await fetch(proxyUrl);
-        const proxyData = await proxyResp.json();
+        // Note: corsproxy.io returns the raw content, unlike allorigins.win which wraps it in a JSON object.
+        const text = await proxyResp.text(); 
         
-        // The actual HTML content is inside the 'contents' property from the proxy
-        const text = proxyData.contents; 
-        
+        // Check for an error response from the proxy/server itself before parsing
+        if (!proxyResp.ok) {
+            throw new Error(`Proxy status: ${proxyResp.status} - ${text}`);
+        }
+
         const jsonMatch = text.match(/<script id="shoebox-store" type="fastboot\/shoebox">(.+?)<\/script>/);
         if (!jsonMatch) { 
             log("❌ Playlist JSON not found. Are you sure the URL is public and correct?"); 
