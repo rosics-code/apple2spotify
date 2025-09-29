@@ -16,7 +16,7 @@
 <body>
 <h1>Apple Music → Spotify Transfer</h1>
 
-<p><strong>✨ Pure JSON Mode:</strong> Since the proxy failed, paste the raw API **JSON response** below.</p>
+<p><strong>✨ JSON Mode - Final Boss:</strong> Paste the raw API **JSON response** from that playlist link.</p>
 
 <label>
   Spotify Playlist Name:
@@ -65,7 +65,7 @@ async function sha256(buffer) {
 }
 
 async function generatePKCE() {
-  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64)))
+  const verifier = Array.from(crypto.getRandomValues(new Uint8array(64)))
     .map(c => ('00' + c.toString(16)).slice(-2)).join("");
   const challenge = base64urlencode(await sha256(verifier));
   return { verifier, challenge };
@@ -175,7 +175,7 @@ document.getElementById("fetchApple").onclick = async () => {
     try {
         let jsonData;
         
-        // 🌟 NEW STEP: DIRECTLY PARSE THE RAW JSON STRING
+        // DIRECTLY PARSE THE RAW JSON STRING
         try {
             jsonData = JSON.parse(rawJsonString);
         } catch (e) {
@@ -185,7 +185,7 @@ document.getElementById("fetchApple").onclick = async () => {
 
         let tempTracks = [];
         
-        // 3. Recursive function to dive into the JSON structure and pull out songs.
+        // 🌟 NEW, MORE AGGRESSIVE PARSING LOGIC
         const extractTracks = (data) => {
             if (!data || typeof data !== 'object') return;
 
@@ -193,26 +193,35 @@ document.getElementById("fetchApple").onclick = async () => {
                 data.forEach(item => extractTracks(item));
                 return;
             }
-            
-            // Handle the 'data' array wrapper common in API responses
-            if (data.data) {
-                extractTracks(data.data);
-                return;
-            }
 
-            // Target the playlist tracks structure
-            if ((data.type === "playlists" || data.type === "albums") && data.relationships && data.relationships.tracks && data.relationships.tracks.data) {
-                data.relationships.tracks.data.forEach(song => {
-                    if (song.type === "songs" && song.attributes) {
-                        tempTracks.push({name: song.attributes.name, artist: song.attributes.artistName});
-                    }
-                });
+            // Target the most likely track list path: data -> [0] -> relationships -> tracks -> data
+            try {
+                if (data.data && Array.isArray(data.data) && data.data[0].relationships.tracks.data) {
+                    data.data[0].relationships.tracks.data.forEach(song => {
+                        if (song.type === "songs" && song.attributes) {
+                             tempTracks.push({name: song.attributes.name, artist: song.attributes.artistName});
+                        }
+                    });
+                    // Success, exit recursion for this branch
+                    return; 
+                }
+            } catch (e) {
+                // Ignore errors here, as the path might not exist
             }
-            // Target the direct song objects
+            
+            // Fallback: Check if the current object *is* a song
             if (data.type === "songs" && data.attributes) {
                 tempTracks.push({name: data.attributes.name, artist: data.attributes.artistName});
             }
+
+            // Deep search any remaining object properties
+            for (const key in data) {
+                if (typeof data[key] === 'object') {
+                    extractTracks(data[key]);
+                }
+            }
         };
+
 
         // 4. Start extraction from the top level
         extractTracks(jsonData);
@@ -224,7 +233,7 @@ document.getElementById("fetchApple").onclick = async () => {
         });
 
         if (appleTracks.length === 0) {
-            log("❌ Zero tracks found. The JSON structure must be slightly different than expected. Try finding a different API response in the Network tab.");
+            log("❌ Zero tracks found. The JSON structure is still different. Try finding a different API response in the Network tab, or paste a public playlist's JSON (not a library one).");
             return;
         }
 
