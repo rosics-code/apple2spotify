@@ -14,9 +14,9 @@
 </style>
 </head>
 <body>
-<h1>Apple Music → Spotify Transfer</h1>
+<h1>Apple Music → Spotify Transfer (PAGINATION MODE)</h1>
 
-<p><strong>✨ Resource Mapping Mode:</strong> This code finds song details in the `resources` section. **Paste the full JSON** (check for pagination!).</p>
+<p><strong>🚨 NEW METHOD:</strong> Paste your **first JSON response** using the first button, then **scroll the playlist** and paste the subsequent paginated responses using the **'Append More JSON'** button.</p>
 
 <label>
   Spotify Playlist Name:
@@ -24,7 +24,8 @@
 </label>
 
 <button id="spotifyLogin">Login to Spotify</button>
-<button id="fetchApple">1. Get Apple Playlist JSON & Parse</button>
+<button id="fetchAppleInitial">1. PASTE INITIAL JSON & START</button>
+<button id="fetchAppleAppend" disabled>1b. APPEND MORE JSON</button>
 <button id="transfer" disabled>2. Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
@@ -38,7 +39,13 @@ let spotifyToken = localStorage.getItem("spotify_access_token");
 let spotifyUserId = null;
 let appleTracks = [];
 
+// Global storage for consolidating all data
+let allArtists = {};
+let allSongs = {};
+let allTrackReferences = [];
+
 const log = msg => document.getElementById("log").textContent += msg + "\n";
+const clearLog = () => document.getElementById("log").textContent = "";
 
 // Helper to update the UI after login (Untouched)
 const updateLoginUI = (isLoggedIn, userName) => {
@@ -53,7 +60,7 @@ const updateLoginUI = (isLoggedIn, userName) => {
     }
 };
 
-// PKCE/Spotify Auth functions (Untouched)
+// PKCE/Spotify Auth functions (Untouched for brevity, assume they are correct)
 function base64urlencode(buffer) {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
   return btoa(String.fromCharCode.apply(null, bytes))
@@ -158,68 +165,78 @@ window.onload = () => {
     }
 };
 
-// Fetch Apple Music tracks - FINAL JSON PARSING FIX
-document.getElementById("fetchApple").onclick = async () => {
-    const rawJsonString = prompt(
-        "PASTE RAW APPLE MUSIC API JSON RESPONSE HERE:\n\n1. Go to your Apple Music playlist (or the URL you found).\n2. Open Dev Tools (F12) -> Network tab.\n3. Refresh the page.\n4. Find the API request that returns the JSON.\n5. Copy the ENTIRE JSON response (right-click -> Copy Response).\n6. Paste it below."
-    );
 
-    if (!rawJsonString) { 
-        log("❌ Action cancelled. Please paste the JSON data to proceed."); 
-        return; 
-    }
+// CORE PARSING LOGIC (Handles one JSON paste at a time)
+const parseAppleJson = (rawJsonString, isInitial) => {
     
-    log("✅ JSON received. Parsing data...");
+    // Clear global stores on initial run only
+    if (isInitial) {
+        allArtists = {};
+        allSongs = {};
+        allTrackReferences = [];
+        clearLog();
+    }
+
+    log(`Processing JSON data chunk... (Initial: ${isInitial})`);
 
     try {
         let jsonData;
-        
         try {
             jsonData = JSON.parse(rawJsonString);
         } catch (e) {
-            log(`❌ Error: Failed to parse the pasted content as JSON. Did you copy the whole response? ${e.message}`);
-            return;
+            log(`❌ Error: Failed to parse the pasted content as JSON. ${e.message}`);
+            return false;
         }
         
-        let tempTracks = [];
-        
         // ===============================================
-        // PASS 1: Create lookup maps from the 'resources' section
+        // PASS 1: Create lookup maps from the 'resources' and 'included' sections
         // ===============================================
-        const artistLookup = {};
-        const songLookup = {};
+        let artistsAdded = 0;
+        let songsAdded = 0;
 
-        if (jsonData.resources) {
-            // Map artists: ID -> Name
-            if (jsonData.resources.artists) {
-                for (const id in jsonData.resources.artists) {
-                    const artist = jsonData.resources.artists[id];
-                    if (artist.attributes && artist.attributes.name) {
-                        artistLookup[id] = artist.attributes.name;
+        // Helper to process a list of resources (songs/artists)
+        const processResources = (resourceList) => {
+            if (!resourceList) return;
+            
+            resourceList.forEach(resource => {
+                if (resource.type === 'artists' && resource.attributes && resource.attributes.name) {
+                    if (!allArtists[resource.id]) {
+                        allArtists[resource.id] = resource.attributes.name;
+                        artistsAdded++;
                     }
-                }
-                log(`🔍 Found ${Object.keys(artistLookup).length} artists in resources.`);
-            }
-
-            // Map songs: ID -> Song Details
-            if (jsonData.resources.songs) {
-                for (const id in jsonData.resources.songs) {
-                    const song = jsonData.resources.songs[id];
-                    if (song.attributes && song.attributes.name) {
-                        songLookup[id] = {
-                            name: song.attributes.name,
-                            artistId: song.relationships.artists.data[0].id // Grab the primary artist ID
+                } else if ((resource.type === 'songs' || resource.type === 'music-videos') && resource.attributes && resource.attributes.name) {
+                    if (!allSongs[resource.id]) {
+                        // Collect full song details, including artist relationships
+                        allSongs[resource.id] = {
+                            name: resource.attributes.name,
+                            artistData: resource.relationships && resource.relationships.artists ? resource.relationships.artists.data : null
                         };
+                        songsAdded++;
                     }
                 }
-                log(`🔍 Found ${Object.keys(songLookup).length} songs in resources.`);
+            });
+        };
+
+        // Check for top-level resources key
+        if (jsonData.resources) {
+            for (const type in jsonData.resources) {
+                if (typeof jsonData.resources[type] === 'object' && !Array.isArray(jsonData.resources[type])) {
+                    processResources(Object.values(jsonData.resources[type])); 
+                }
             }
         }
+
+        // Check for top-level included key 
+        if (jsonData.included) {
+            processResources(jsonData.included);
+        }
+        
+        log(`🔍 New Data MUSHED: ${artistsAdded} artists | ${songsAdded} full songs.`);
         
         // ===============================================
-        // PASS 2: Extract tracks from the main playlist data and use maps
+        // PASS 2: Extract track references from the main playlist data 
         // ===============================================
-        const trackReferences = [];
+        let referencesAdded = 0;
 
         // Recursive function to find the core track data array references
         const findTrackReferences = (data) => {
@@ -229,11 +246,13 @@ document.getElementById("fetchApple").onclick = async () => {
                 return;
             }
 
-            // Check for the tracks relationship inside the main data object
+            // Target the playlist tracks relationship
             if (data.relationships && data.relationships.tracks && data.relationships.tracks.data) {
                 data.relationships.tracks.data.forEach(trackRef => {
-                    if (trackRef.type === 'songs' || trackRef.type === 'music-videos') {
-                        trackReferences.push(trackRef);
+                    // Check if the track reference is already in our list
+                    if ((trackRef.type === 'songs' || trackRef.type === 'music-videos') && !allTrackReferences.find(r => r.id === trackRef.id)) {
+                        allTrackReferences.push(trackRef);
+                        referencesAdded++;
                     }
                 });
                 return;
@@ -248,68 +267,87 @@ document.getElementById("fetchApple").onclick = async () => {
         };
 
         findTrackReferences(jsonData.data);
+        log(`🔍 References added: ${referencesAdded} (Total: ${allTrackReferences.length}).`);
         
-        if (trackReferences.length === 0) {
-            log("❌ Could not find any track references (relationships/tracks/data). Please check the API response for pagination or a different structure.");
-            return;
-        }
-
-        // Combine track info
-        trackReferences.forEach(trackRef => {
-            // 1. Try to get details from the main songLookup (if resources/songs exists)
-            let name = '';
-            let artist = '';
-            
-            if (songLookup[trackRef.id]) {
-                name = songLookup[trackRef.id].name;
-                artist = artistLookup[songLookup[trackRef.id].artistId] || 'Unknown Artist';
-            } else {
-                // 2. Fallback to extracting name/artist directly if the track itself is in 'included' (less likely but possible)
-                // This is less reliable but handles edge cases if trackRef holds full attributes
-                 if (trackRef.attributes) {
-                     name = trackRef.attributes.name;
-                     // Try to resolve artist from relationships on the track reference itself
-                     if (trackRef.relationships && trackRef.relationships.artists && trackRef.relationships.artists.data.length > 0) {
-                         const artistId = trackRef.relationships.artists.data[0].id;
-                         artist = artistLookup[artistId] || trackRef.attributes.artistName || 'Unknown Artist';
-                     } else {
-                        artist = trackRef.attributes.artistName || 'Unknown Artist';
-                     }
-                }
-            }
-
-            if (name && artist && name !== 'undefined') {
-                tempTracks.push({name, artist});
-            }
-        });
-
-        // De-dupe the tracks
-        appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
-            const [name, artist] = str.split('|');
-            return { name, artist };
-        });
-
-        if (appleTracks.length === 0) {
-            log("❌ Zero unique, valid tracks found. Data structure is incompatible or you are missing pagination data.");
-            return;
-        }
-
-        log(`✅ Found ${appleTracks.length} unique tracks! Ready for transfer.`);
-
-        const trackListDiv = document.getElementById("trackList");
-        trackListDiv.innerHTML = "";
-        appleTracks.forEach((t, i) => {
-            const div = document.createElement("div");
-            div.className = "track";
-            div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
-            trackListDiv.appendChild(div);
-        });
-
-        document.getElementById("transfer").disabled = !spotifyToken;
+        return true; // Successfully parsed
     } catch(e) {
         log(`❌ A major error occurred during parsing: ${e.message}`);
+        return false;
     }
 };
+
+
+// Function to finalize the data, map names, and update UI
+const finalizeTracks = () => {
+    let tempTracks = [];
+
+    // Combine track info
+    allTrackReferences.forEach(trackRef => {
+        const songData = allSongs[trackRef.id];
+        
+        if (songData) {
+            let primaryArtistName = 'Unknown Artist';
+            
+            // Get the artist ID from the song data's relationships
+            if (songData.artistData && songData.artistData.length > 0) {
+                const primaryArtistId = songData.artistData[0].id;
+                primaryArtistName = allArtists[primaryArtistId] || primaryArtistName;
+            }
+            
+            const name = songData.name;
+            const artist = primaryArtistName;
+
+            if (name && name !== 'undefined' && artist !== 'Unknown Artist') {
+                tempTracks.push({name, artist});
+            }
+        }
+    });
+
+    // De-dupe the tracks
+    appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
+        const [name, artist] = str.split('|');
+        return { name, artist };
+    });
+
+    if (appleTracks.length === 0) {
+        log("❌ Zero unique, valid tracks found. Try pasting more JSON data by scrolling your playlist.");
+        return;
+    }
+
+    log(`\n🎉 Final Check: Found ${appleTracks.length} unique tracks! Ready for transfer.`);
+
+    const trackListDiv = document.getElementById("trackList");
+    trackListDiv.innerHTML = "";
+    appleTracks.forEach((t, i) => {
+        const div = document.createElement("div");
+        div.className = "track";
+        div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
+        trackListDiv.appendChild(div);
+    });
+
+    document.getElementById("transfer").disabled = !spotifyToken;
+};
+
+// Event handlers for the two paste buttons
+document.getElementById("fetchAppleInitial").onclick = () => {
+    const rawJsonString = prompt("PASTE THE FIRST (OFFSET=0) FULL JSON RESPONSE HERE:");
+    if (!rawJsonString) { return; }
+    
+    if (parseAppleJson(rawJsonString, true)) {
+        document.getElementById("fetchAppleAppend").disabled = false;
+        finalizeTracks();
+    }
+};
+
+document.getElementById("fetchAppleAppend").onclick = () => {
+    const rawJsonString = prompt("PASTE THE NEXT PAGINATION JSON RESPONSE HERE:");
+    if (!rawJsonString) { return; }
+    
+    if (parseAppleJson(rawJsonString, false)) {
+        finalizeTracks();
+    }
+};
+
 
 // Transfer selected tracks to Spotify (Untouched)
 document.getElementById("transfer").onclick = async () => {
