@@ -16,7 +16,7 @@
 <body>
 <h1>Apple Music → Spotify Transfer</h1>
 
-<p><strong>✨ JSON Mode - Final Boss:</strong> Paste the raw API **JSON response** from that playlist link. NEW UPDATE</p>
+<p><strong>🔥 LAST CHANCE:</strong> This parser targets the **`included`** array in the JSON, which usually holds the actual track data. Paste the full JSON response (check for pagination!).</p>
 
 <label>
   Spotify Playlist Name:
@@ -160,9 +160,8 @@ window.onload = () => {
 
 // Fetch Apple Music tracks - FINAL JSON PARSING FIX
 document.getElementById("fetchApple").onclick = async () => {
-    // 🌟 MANUAL PASTE PROMPT - CLEAR INSTRUCTIONS FOR JSON
     const rawJsonString = prompt(
-        "PASTE RAW APPLE MUSIC API JSON RESPONSE HERE:\n\n1. Go to your Apple Music playlist (or the URL you found).\n2. Open Dev Tools (F12) -> Network tab.\n3. Refresh the page.\n4. Find the API request that returns the JSON (Filter by 'playlist' or the full URL).\n5. Copy the ENTIRE JSON response (usually by right-clicking the response and selecting 'Copy Value' or 'Copy Response').\n6. Paste it below."
+        "PASTE RAW APPLE MUSIC API JSON RESPONSE HERE:\n\n1. Go to your Apple Music playlist (or the URL you found).\n2. Open Dev Tools (F12) -> Network tab.\n3. Refresh the page.\n4. Find the API request that returns the JSON.\n5. Copy the ENTIRE JSON response (right-click -> Copy Response).\n6. Paste it below."
     );
 
     if (!rawJsonString) { 
@@ -175,7 +174,6 @@ document.getElementById("fetchApple").onclick = async () => {
     try {
         let jsonData;
         
-        // DIRECTLY PARSE THE RAW JSON STRING
         try {
             jsonData = JSON.parse(rawJsonString);
         } catch (e) {
@@ -185,50 +183,49 @@ document.getElementById("fetchApple").onclick = async () => {
 
         let tempTracks = [];
         
-        // 🌟 FINAL, ULTRA-AGGRESSIVE PARSING LOGIC
-        const extractTracks = (data) => {
-            if (!data || typeof data !== 'object') return;
+        // 🌟 CORE NEW LOGIC: Look for tracks in the 'included' array OR the main data body.
+        
+        // 1. Process the 'included' array (often contains track details)
+        const possibleTracks = [];
+        if (jsonData.included && Array.isArray(jsonData.included)) {
+             jsonData.included.forEach(item => possibleTracks.push(item));
+        }
 
-            if (Array.isArray(data)) {
-                data.forEach(item => extractTracks(item));
-                return;
-            }
+        // 2. Process the main 'data' array (might contain track items or the track list reference)
+        if (jsonData.data) {
+             // Handle array of playlists/albums
+             if (Array.isArray(jsonData.data)) {
+                 jsonData.data.forEach(item => {
+                     // Check for the tracks relationship inside the main data object
+                     if (item.relationships && item.relationships.tracks && item.relationships.tracks.data) {
+                         item.relationships.tracks.data.forEach(trackRef => possibleTracks.push(trackRef));
+                     }
+                 });
+             } else {
+                 // Handle single playlist/album object
+                 if (jsonData.data.relationships && jsonData.data.relationships.tracks && jsonData.data.relationships.tracks.data) {
+                     jsonData.data.relationships.tracks.data.forEach(trackRef => possibleTracks.push(trackRef));
+                 }
+             }
+        }
 
-            // 1. Check for the definitive song object first
+
+        // 3. Extract final data from all found objects
+        possibleTracks.forEach(data => {
+            // Must have type 'songs' and attributes
             if (data.type === "songs" && data.attributes) {
-                // Ensure name and artist exist to prevent 'undefined'
                 const name = data.attributes.name;
                 const artist = data.attributes.artistName;
 
+                // Only push valid tracks
                 if (name && artist) {
                     tempTracks.push({name: name, artist: artist});
                 } else if (name || artist) {
-                    // Log the weird undefined ones so you know what happened
-                    log(`⚠️ Skipped track due to missing name/artist: ${name || 'N/A'} by ${artist || 'N/A'}`);
-                }
-                // Skip deep-diving this song object
-                return; 
-            }
-
-            // 2. Check for the playlist tracks relationship
-            if (data.relationships && data.relationships.tracks && data.relationships.tracks.data) {
-                extractTracks(data.relationships.tracks.data);
-                // Skip deep-diving this entire relationship object
-                return;
-            }
-            
-            // 3. Recursive deep search for any other properties (like "data" wrappers or "included" sections)
-            for (const key in data) {
-                // Only traverse properties that haven't been processed yet
-                if (key !== 'relationships' && typeof data[key] === 'object') {
-                    extractTracks(data[key]);
+                    log(`⚠️ Skipped track due to missing name/artist in data.`);
                 }
             }
-        };
+        });
 
-
-        // 4. Start extraction from the top level
-        extractTracks(jsonData);
 
         // De-dupe the tracks
         appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
@@ -237,7 +234,7 @@ document.getElementById("fetchApple").onclick = async () => {
         });
 
         if (appleTracks.length === 0) {
-            log("❌ Zero unique, valid tracks found. The JSON structure is still different or all tracks are missing data. Try scrolling your playlist in the browser, then check the network tab again for more JSON requests (pagination).");
+            log("❌ Zero unique, valid tracks found. The JSON structure is still different. Ensure you found the main API response for your playlist and check for pagination.");
             return;
         }
 
