@@ -14,9 +14,9 @@
 </style>
 </head>
 <body>
-<h1>Apple Music → Spotify Transfer (PAGINATION MODE)</h1>
+<h1>Apple Music → Spotify Transfer (ULTRA-VACUUM MODE)</h1>
 
-<p><strong>🚨 NEW METHOD:</strong> Paste your **first JSON response** using the first button, then **scroll the playlist** and paste the subsequent paginated responses using the **'Append More JSON'** button.</p>
+<p><strong>✨ THE ONE:</strong> This script will search the **entire JSON** you paste for *any* song or artist data. Find the **biggest** playlist JSON and paste it once.</p>
 
 <label>
   Spotify Playlist Name:
@@ -24,8 +24,7 @@
 </label>
 
 <button id="spotifyLogin">Login to Spotify</button>
-<button id="fetchAppleInitial">1. PASTE INITIAL JSON & START</button>
-<button id="fetchAppleAppend" disabled>1b. APPEND MORE JSON</button>
+<button id="fetchApple">1. PASTE JSON & PARSE ALL</button>
 <button id="transfer" disabled>2. Transfer Selected Tracks</button>
 
 <div id="trackList"></div>
@@ -38,11 +37,6 @@ const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html";
 let spotifyToken = localStorage.getItem("spotify_access_token");
 let spotifyUserId = null;
 let appleTracks = [];
-
-// Global storage for consolidating all data
-let allArtists = {};
-let allSongs = {};
-let allTrackReferences = [];
 
 const log = msg => document.getElementById("log").textContent += msg + "\n";
 const clearLog = () => document.getElementById("log").textContent = "";
@@ -72,7 +66,7 @@ async function sha256(buffer) {
 }
 
 async function generatePKCE() {
-  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64)))
+  const verifier = Array.from(crypto.getRandomValues(new Uint8array(64)))
     .map(c => ('00' + c.toString(16)).slice(-2)).join("");
   const challenge = base64urlencode(await sha256(verifier));
   return { verifier, challenge };
@@ -166,186 +160,149 @@ window.onload = () => {
 };
 
 
-// CORE PARSING LOGIC (Handles one JSON paste at a time)
-const parseAppleJson = (rawJsonString, isInitial) => {
+// CORE AGGRESSIVE PARSING LOGIC
+const parseAppleJson = (rawJsonString) => {
     
-    // Clear global stores on initial run only
-    if (isInitial) {
-        allArtists = {};
-        allSongs = {};
-        allTrackReferences = [];
-        clearLog();
-    }
-
-    log(`Processing JSON data chunk... (Initial: ${isInitial})`);
+    clearLog();
+    log("Processing JSON data with the Ultra-Vacuum parser...");
 
     try {
         let jsonData;
         try {
             jsonData = JSON.parse(rawJsonString);
         } catch (e) {
-            log(`❌ Error: Failed to parse the pasted content as JSON. ${e.message}`);
+            log(`❌ Error: Failed to parse the pasted content as JSON. Did you copy the whole response? ${e.message}`);
             return false;
         }
         
-        // ===============================================
-        // PASS 1: Create lookup maps from the 'resources' and 'included' sections
-        // ===============================================
-        let artistsAdded = 0;
-        let songsAdded = 0;
+        // Global maps to store unique song and artist data found anywhere
+        const allArtists = {};
+        const allSongs = {};
+        const trackReferences = [];
 
-        // Helper to process a list of resources (songs/artists)
-        const processResources = (resourceList) => {
-            if (!resourceList) return;
-            
-            resourceList.forEach(resource => {
-                if (resource.type === 'artists' && resource.attributes && resource.attributes.name) {
-                    if (!allArtists[resource.id]) {
-                        allArtists[resource.id] = resource.attributes.name;
-                        artistsAdded++;
-                    }
-                } else if ((resource.type === 'songs' || resource.type === 'music-videos') && resource.attributes && resource.attributes.name) {
-                    if (!allSongs[resource.id]) {
-                        // Collect full song details, including artist relationships
-                        allSongs[resource.id] = {
-                            name: resource.attributes.name,
-                            artistData: resource.relationships && resource.relationships.artists ? resource.relationships.artists.data : null
-                        };
-                        songsAdded++;
-                    }
-                }
-            });
-        };
-
-        // Check for top-level resources key
-        if (jsonData.resources) {
-            for (const type in jsonData.resources) {
-                if (typeof jsonData.resources[type] === 'object' && !Array.isArray(jsonData.resources[type])) {
-                    processResources(Object.values(jsonData.resources[type])); 
-                }
-            }
-        }
-
-        // Check for top-level included key 
-        if (jsonData.included) {
-            processResources(jsonData.included);
-        }
-        
-        log(`🔍 New Data MUSHED: ${artistsAdded} artists | ${songsAdded} full songs.`);
-        
-        // ===============================================
-        // PASS 2: Extract track references from the main playlist data 
-        // ===============================================
-        let referencesAdded = 0;
-
-        // Recursive function to find the core track data array references
-        const findTrackReferences = (data) => {
+        // Recursive function to search EVERYTHING for songs, artists, and references
+        const aggressiveSearch = (data) => {
             if (!data || typeof data !== 'object') return;
+            
+            // Handle arrays (recursion)
             if (Array.isArray(data)) {
-                data.forEach(item => findTrackReferences(item));
+                data.forEach(item => aggressiveSearch(item));
                 return;
             }
 
-            // Target the playlist tracks relationship
-            if (data.relationships && data.relationships.tracks && data.relationships.tracks.data) {
-                data.relationships.tracks.data.forEach(trackRef => {
-                    // Check if the track reference is already in our list
-                    if ((trackRef.type === 'songs' || trackRef.type === 'music-videos') && !allTrackReferences.find(r => r.id === trackRef.id)) {
-                        allTrackReferences.push(trackRef);
-                        referencesAdded++;
-                    }
-                });
-                return;
+            // --- 1. Identify and Store Full Song/Artist Data ---
+            if (data.type === 'artists' && data.attributes && data.attributes.name) {
+                // Store artist name by ID
+                allArtists[data.id] = data.attributes.name;
+            } else if ((data.type === 'songs' || data.type === 'music-videos') && data.attributes) {
+                // Store full song details by ID if it has a name
+                if (data.attributes.name) {
+                    allSongs[data.id] = {
+                        name: data.attributes.name,
+                        // Get artist ID reference, often found in relationships
+                        artistData: data.relationships && data.relationships.artists ? data.relationships.artists.data : null
+                    };
+                }
+                
+                // If this is a song object without full attributes, it might be a reference
+                // We let it fall through to the next check just in case.
             }
             
-            // Recurse through all properties
+            // --- 2. Identify and Store Playlist Track References ---
+            // If it's a song/music-video type, it's a reference to a track, even if it's nested
+            if ((data.type === 'songs' || data.type === 'music-videos') && data.id) {
+                 if (!trackReferences.find(r => r.id === data.id)) {
+                    trackReferences.push({id: data.id, type: data.type});
+                }
+            }
+
+            // If it contains a relationships.tracks.data array, grab those references too
+             if (data.relationships && data.relationships.tracks && Array.isArray(data.relationships.tracks.data)) {
+                 data.relationships.tracks.data.forEach(ref => {
+                     if ((ref.type === 'songs' || ref.type === 'music-videos') && !trackReferences.find(r => r.id === ref.id)) {
+                        trackReferences.push(ref);
+                    }
+                 });
+             }
+
+            // --- 3. Recurse through all object properties (Deep Dive) ---
             for (const key in data) {
-                 if (typeof data[key] === 'object') {
-                    findTrackReferences(data[key]);
+                 if (typeof data[key] === 'object' && key !== 'attributes') { // Avoid deep diving into simple attribute lists
+                    aggressiveSearch(data[key]);
                 }
             }
         };
 
-        findTrackReferences(jsonData.data);
-        log(`🔍 References added: ${referencesAdded} (Total: ${allTrackReferences.length}).`);
+        // Start the search from the top level
+        aggressiveSearch(jsonData);
         
-        return true; // Successfully parsed
+        log(`🔍 Found ${Object.keys(allArtists).length} unique artists.`);
+        log(`🔍 Found ${Object.keys(allSongs).length} unique full songs (with names).`);
+        log(`🔍 Found ${trackReferences.length} track ID references.`);
+        
+        
+        // ===============================================
+        // FINAL PASS: Combine references and song data
+        // ===============================================
+        let tempTracks = [];
+
+        trackReferences.forEach(trackRef => {
+            const songData = allSongs[trackRef.id];
+            
+            if (songData) {
+                let primaryArtistName = 'Unknown Artist';
+                
+                // Get the artist ID from the song data's relationships
+                if (songData.artistData && songData.artistData.length > 0) {
+                    const primaryArtistId = songData.artistData[0].id;
+                    primaryArtistName = allArtists[primaryArtistId] || primaryArtistName;
+                }
+                
+                const name = songData.name;
+                const artist = primaryArtistName;
+
+                if (name && name !== 'undefined' && artist !== 'Unknown Artist') {
+                    tempTracks.push({name, artist});
+                }
+            }
+        });
+
+        // De-dupe the tracks
+        appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
+            const [name, artist] = str.split('|');
+            return { name, artist };
+        });
+
+        if (appleTracks.length === 0) {
+            log("❌ Zero unique, valid tracks found after combining data. Ensure you pasted the main playlist JSON response.");
+            return true; // Still report true so we don't block
+        }
+
+        log(`\n🎉 Success! Found ${appleTracks.length} unique tracks! Ready for transfer.`);
+
+        const trackListDiv = document.getElementById("trackList");
+        trackListDiv.innerHTML = "";
+        appleTracks.forEach((t, i) => {
+            const div = document.createElement("div");
+            div.className = "track";
+            div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
+            trackListDiv.appendChild(div);
+        });
+
+        document.getElementById("transfer").disabled = !spotifyToken;
+        return true; 
     } catch(e) {
         log(`❌ A major error occurred during parsing: ${e.message}`);
         return false;
     }
 };
 
-
-// Function to finalize the data, map names, and update UI
-const finalizeTracks = () => {
-    let tempTracks = [];
-
-    // Combine track info
-    allTrackReferences.forEach(trackRef => {
-        const songData = allSongs[trackRef.id];
-        
-        if (songData) {
-            let primaryArtistName = 'Unknown Artist';
-            
-            // Get the artist ID from the song data's relationships
-            if (songData.artistData && songData.artistData.length > 0) {
-                const primaryArtistId = songData.artistData[0].id;
-                primaryArtistName = allArtists[primaryArtistId] || primaryArtistName;
-            }
-            
-            const name = songData.name;
-            const artist = primaryArtistName;
-
-            if (name && name !== 'undefined' && artist !== 'Unknown Artist') {
-                tempTracks.push({name, artist});
-            }
-        }
-    });
-
-    // De-dupe the tracks
-    appleTracks = Array.from(new Set(tempTracks.map(t => `${t.name}|${t.artist}`))).map(str => {
-        const [name, artist] = str.split('|');
-        return { name, artist };
-    });
-
-    if (appleTracks.length === 0) {
-        log("❌ Zero unique, valid tracks found. Try pasting more JSON data by scrolling your playlist.");
-        return;
-    }
-
-    log(`\n🎉 Final Check: Found ${appleTracks.length} unique tracks! Ready for transfer.`);
-
-    const trackListDiv = document.getElementById("trackList");
-    trackListDiv.innerHTML = "";
-    appleTracks.forEach((t, i) => {
-        const div = document.createElement("div");
-        div.className = "track";
-        div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
-        trackListDiv.appendChild(div);
-    });
-
-    document.getElementById("transfer").disabled = !spotifyToken;
-};
-
-// Event handlers for the two paste buttons
-document.getElementById("fetchAppleInitial").onclick = () => {
-    const rawJsonString = prompt("PASTE THE FIRST (OFFSET=0) FULL JSON RESPONSE HERE:");
+// Event handler for the single paste button
+document.getElementById("fetchApple").onclick = () => {
+    const rawJsonString = prompt("PASTE THE ENTIRE JSON RESPONSE HERE. Choose the largest file from the Network tab that contains your playlist's track list.");
     if (!rawJsonString) { return; }
     
-    if (parseAppleJson(rawJsonString, true)) {
-        document.getElementById("fetchAppleAppend").disabled = false;
-        finalizeTracks();
-    }
-};
-
-document.getElementById("fetchAppleAppend").onclick = () => {
-    const rawJsonString = prompt("PASTE THE NEXT PAGINATION JSON RESPONSE HERE:");
-    if (!rawJsonString) { return; }
-    
-    if (parseAppleJson(rawJsonString, false)) {
-        finalizeTracks();
-    }
+    parseAppleJson(rawJsonString);
 };
 
 
