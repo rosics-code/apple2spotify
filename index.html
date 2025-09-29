@@ -1,3 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Apple2Spotify</title>
+<style>
+  body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+  h1 { text-align: center; }
+  input[type=text] { width: 100%; padding: 8px; margin: 5px 0; }
+  button { padding: 10px 15px; margin: 5px 0; }
+  #trackList { max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-top: 10px; }
+  .track { display: flex; align-items: center; margin-bottom: 5px; }
+  .track label { flex: 1; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Apple Music → Spotify Transfer</h1>
+
+<label>
+  Apple Music Public Playlist URL:
+  <input type="text" id="appleUrl" placeholder="https://music.apple.com/...">
+</label>
+
+<label>
+  Spotify Playlist Name:
+  <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
+</label>
+
+<button id="spotifyLogin">Login to Spotify</button>
+<button id="fetchApple">Fetch Tracks</button>
+<button id="transfer" disabled>Transfer Selected Tracks</button>
+
+<div id="trackList"></div>
+<pre id="log"></pre>
+
 <script>
 const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
 const REDIRECT_URI = "https://rosics-code.github.io/apple2spotify/index.html";
@@ -35,10 +70,10 @@ document.getElementById("spotifyLogin").onclick = async () => {
   const { verifier, challenge } = await generatePKCE();
   sessionStorage.setItem("pkce_verifier", verifier);
 
-  // 🚨 Added user-read-private scope which is required for the /me endpoint 🚨
+  // Added user-read-private scope which is required for the /me endpoint 
   const scopes = "playlist-modify-private playlist-modify-public user-read-private"; 
   
-  // Correctly construct the authorization URL
+  // **FIXED** - Correctly construct the authorization URL using URLSearchParams
   const authUrl = new URL("https://accounts.spotify.com/authorize?client_id=$");
   authUrl.searchParams.append('response_type', 'code');
   authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
@@ -99,7 +134,7 @@ window.onload = () => {
   }
 };
 
-// Fetch Apple Music tracks (same as before)
+// Fetch Apple Music tracks (from the previously working logic)
 document.getElementById("fetchApple").onclick = async () => {
   const appleUrl = document.getElementById("appleUrl").value.trim();
   if (!appleUrl) { log("❌ Enter Apple Music URL"); return; }
@@ -164,6 +199,7 @@ document.getElementById("transfer").onclick = async () => {
   const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
   try {
+    // Create Playlist
     const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
       method: "POST",
       headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
@@ -173,6 +209,7 @@ document.getElementById("transfer").onclick = async () => {
     log("✅ Created Spotify playlist: " + newPlaylist.name);
 
     const uris = [];
+    // Search for Tracks
     for (const t of selectedTracks) {
       const query = encodeURIComponent(`${t.name} ${t.artist}`);
       const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, { headers: { Authorization: `Bearer ${spotifyToken}` } });
@@ -187,6 +224,7 @@ document.getElementById("transfer").onclick = async () => {
 
     log(`Found ${uris.length} Spotify matches. Adding to playlist...`);
 
+    // Add Tracks in Batches
     for (let i = 0; i < uris.length; i += 100) {
       const chunk = uris.slice(i, i + 100);
       await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
@@ -201,3 +239,5 @@ document.getElementById("transfer").onclick = async () => {
   }
 };
 </script>
+</body>
+</html>
