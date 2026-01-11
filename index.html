@@ -2,32 +2,30 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Apple2Spotify (GOD MODE ⚡)</title>
+<title>Apple2Spotify (ANTI-DIDDY EDITION 🛡️)</title>
 <style>
   body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background-color: #000; color: #fff; }
-  h1 { text-align: center; color: #1DB954; font-size: 2.5em; text-transform: uppercase; letter-spacing: 2px; }
-  input[type=text] { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #1DB954; border-radius: 12px; background: #222; color: #fff; font-size: 16px; }
+  h1 { text-align: center; color: #1DB954; text-transform: uppercase; }
+  input[type=text] { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #1DB954; border-radius: 12px; background: #222; color: #fff; }
   .controls { display: flex; gap: 15px; justify-content: center; margin: 20px 0; }
   button { padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.3s; }
   #spotifyLogin { background-color: #1DB954; color: white; }
   #fetchApple { background-color: #ff2d55; color: white; }
   #transfer { background-color: #fff; color: #000; }
-  button:hover { transform: scale(1.05); opacity: 0.9; }
-  #trackList { max-height: 200px; overflow-y: auto; border: 1px solid #333; padding: 15px; background: #111; border-radius: 12px; margin-bottom: 20px; color: #888; }
-  #log { white-space: pre-wrap; background-color: #000; color: #32ff7e; padding: 20px; border: 1px solid #1DB954; border-radius: 12px; font-family: 'Courier New', Courier, monospace; font-size: 13px; height: 500px; overflow-y: auto; box-shadow: 0 0 15px rgba(29, 185, 84, 0.2); }
+  #log { white-space: pre-wrap; background-color: #000; color: #32ff7e; padding: 20px; border: 1px solid #1DB954; border-radius: 12px; font-family: monospace; font-size: 13px; height: 500px; overflow-y: auto; }
   .artist-name { color: #1DB954; font-weight: bold; }
+  .error-name { color: #ff2d55; }
 </style>
 </head>
 <body>
-<h1>YouAreCuteVille God Mode ⚡</h1>
-<input type="text" id="spotifyPlaylistName" placeholder="Enter Playlist Name (e.g., Ultimate Anthems 💖)">
+<h1>Miley Cyrus Approved 🛡️✨</h1>
+<input type="text" id="spotifyPlaylistName" placeholder="Miley > Diddy Anthems 💖">
 <div class="controls">
-    <button id="spotifyLogin">1. Login Spotify</button>
+    <button id="spotifyLogin">1. Login</button>
     <button id="fetchApple">2. Paste JSON</button>
-    <button id="transfer" disabled>3. Launch Transfer 🚀</button>
+    <button id="transfer" disabled>3. Secure Transfer 🚀</button>
 </div>
-<div id="trackList">Pending bops...</div>
-<pre id="log">Waiting for you to be iconic, johnball589... ✨</pre>
+<pre id="log">Waiting for bops... No Diddys allowed. 🙅‍♂️</pre>
 
 <script>
 const CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
@@ -35,7 +33,6 @@ const REDIRECT = "https://rosics-code.github.io/apple2spotify/index.html";
 let token = localStorage.getItem("spotify_access_token"), userId = null, appleTracks = [];
 
 const log = msg => { const l = document.getElementById("log"); l.innerHTML += msg + "\n"; l.scrollTop = l.scrollHeight; };
-
 const clean = (n) => n.split(' (')[0].split(' [')[0].split(' - ')[0].replace(/feat\..*/gi,'').replace(/ft\..*/gi,'').trim();
 
 document.getElementById("spotifyLogin").onclick = () => {
@@ -43,61 +40,59 @@ document.getElementById("spotifyLogin").onclick = () => {
 };
 
 document.getElementById("fetchApple").onclick = () => {
-    const raw = prompt("Paste the JSON here:");
+    const raw = prompt("Paste the JSON:");
     if(!raw) return;
-    try {
-        const data = JSON.parse(raw);
-        const found = [];
-        const search = (obj) => {
-            if(!obj || typeof obj !== 'object') return;
-            if((obj.type === 'songs' || obj.type === 'library-songs') && obj.attributes?.name) {
-                found.push({ name: obj.attributes.name, artist: obj.attributes.artistName });
-            }
-            Object.values(obj).forEach(v => search(v));
-        };
-        search(data);
-        appleTracks = Array.from(new Set(found.map(a => JSON.stringify(a)))).map(a => JSON.parse(a));
-        document.getElementById("trackList").innerHTML = appleTracks.map(t => `<div>${t.name} - ${t.artist}</div>`).join('');
-        log(`🔎 Loaded ${appleTracks.length} unique tracks. No duplicates allowed in YouAreCuteVille!`);
-        document.getElementById("transfer").disabled = false;
-    } catch(e) { alert("JSON is messy! Try again."); }
+    const data = JSON.parse(raw);
+    const found = [];
+    const search = (obj) => {
+        if(!obj || typeof obj !== 'object') return;
+        if((obj.type === 'songs' || obj.type === 'library-songs') && obj.attributes?.name) {
+            found.push({ name: obj.attributes.name, artist: obj.attributes.artistName });
+        }
+        Object.values(obj).forEach(v => search(v));
+    };
+    search(data);
+    appleTracks = Array.from(new Set(found.map(a => JSON.stringify(a)))).map(a => JSON.parse(a));
+    log(`🔎 Loaded ${appleTracks.length} tracks.`);
+    document.getElementById("transfer").disabled = false;
 };
 
-async function spotifySearch(name, artist) {
+async function secureSearch(name, artist) {
     const cleanName = clean(name);
-    const queries = [
-        `track:${cleanName} artist:${artist}`, // Strict
-        `${cleanName} ${artist}`,              // Fuzzy
-        `${cleanName}`                         // Last Resort
-    ];
+    const query = encodeURIComponent(`track:${cleanName} artist:${artist}`);
+    const resp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=10`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await resp.json();
+    const items = data.tracks?.items || [];
 
-    for (let query of queries) {
-        const resp = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=8`, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await resp.json();
-        const items = data.tracks?.items || [];
+    if (items.length > 0) {
+        // FILTER: The artist MUST be in the result's artist list
+        const legitMatches = items.filter(i => 
+            i.artists.some(a => artist.toLowerCase().includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(artist.toLowerCase()))
+        );
 
-        if (items.length > 0) {
-            // Priority 1: Match Artist + Explicit
-            let match = items.find(i => i.explicit && i.artists.some(a => artist.toLowerCase().includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(artist.toLowerCase())));
-            // Priority 2: Match Artist
-            if (!match) match = items.find(i => i.artists.some(a => artist.toLowerCase().includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(artist.toLowerCase())));
-            // Priority 3: Just Explicit
-            if (!match) match = items.find(i => i.explicit);
-            // Priority 4: First result
-            if (!match) match = items[0];
-
-            return match;
+        if (legitMatches.length > 0) {
+            // Pick explicit if possible, otherwise first legit match
+            return legitMatches.find(i => i.explicit) || legitMatches[0];
         }
     }
-    return null;
+    
+    // BACKUP: If strict failed, try fuzzy but STILL filter by artist
+    const fuzzyResp = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(cleanName + " " + artist)}&type=track&limit=10`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    const fuzzyData = await fuzzyResp.json();
+    const fuzzyItems = fuzzyData.tracks?.items || [];
+    
+    return fuzzyItems.find(i => 
+        i.artists.some(a => artist.toLowerCase().includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(artist.toLowerCase()))
+    ) || null;
 }
 
 document.getElementById("transfer").onclick = async () => {
-    const pName = document.getElementById("spotifyPlaylistName").value || "God Mode Anthems";
-    log(`🚀 <b>STARTING HYPER-TRANSFER...</b>`);
-    
+    log(`🚀 <b>STARTING SECURE TRANSFER...</b>`);
+    const pName = document.getElementById("spotifyPlaylistName").value || "Safe Anthems";
     const pResp = await fetch(`https://api.spotify.com/v1/users/${userId}/playlists`, {
         method: "POST", headers: { Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: pName, public: false })
@@ -105,18 +100,18 @@ document.getElementById("transfer").onclick = async () => {
     const playlist = await pResp.json();
 
     const uris = [];
-    const chunks = [];
-    for (let i = 0; i < appleTracks.length; i += 20) chunks.push(appleTracks.slice(i, i + 20));
-
-    for (const chunk of chunks) {
-        const results = await Promise.all(chunk.map(t => spotifySearch(t.name, t.artist)));
+    // Process in smaller batches for better tracking
+    for (let i = 0; i < appleTracks.length; i += 10) {
+        const chunk = appleTracks.slice(i, i + 10);
+        const results = await Promise.all(chunk.map(t => secureSearch(t.name, t.artist)));
+        
         results.forEach((match, index) => {
             const original = chunk[index];
             if (match) {
                 uris.push(match.uri);
-                log(`${match.explicit ? '🔥' : '✅'} ${original.name} — <span class="artist-name">${match.artists[0].name}</span>`);
+                log(`${match.explicit ? '🔥' : '✅'} ${match.name} — <span class="artist-name">${match.artists[0].name}</span>`);
             } else {
-                log(`❌ STILL MISSING: ${original.name} by ${original.artist}`);
+                log(`<span class="error-name">❌ REJECTED/MISSING: ${original.name} by ${original.artist}</span>`);
             }
         });
     }
@@ -127,7 +122,7 @@ document.getElementById("transfer").onclick = async () => {
             body: JSON.stringify({ uris: uris.slice(i, i + 100) })
         });
     }
-    log(`\n🎉 <b>FINISHED!</b> Added ${uris.length}/${appleTracks.length} bops to '${pName}'!`);
+    log(`\n🎉 <b>FINISHED!</b> ${uris.length} tracks are safe in '${pName}'!`);
 };
 
 window.onload = async () => {
@@ -137,7 +132,147 @@ window.onload = async () => {
         const uResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: `Bearer ${token}` } });
         const uData = await uResp.json();
         userId = uData.id;
-        log(`✅ Logged in as <span class="artist-name">${uData.display_name}</span>`);
+        log(`🛡️ <b>Security Enabled</b> for user: <span class="artist-name">${uData.display_name}</span>`);
+        document.getElementById("transfer").disabled = false;
+    }
+};
+</script>
+</body>
+</html><!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Apple2Spotify (ANTI-DIDDY EDITION 🛡️)</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background-color: #000; color: #fff; }
+  h1 { text-align: center; color: #1DB954; text-transform: uppercase; }
+  input[type=text] { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #1DB954; border-radius: 12px; background: #222; color: #fff; }
+  .controls { display: flex; gap: 15px; justify-content: center; margin: 20px 0; }
+  button { padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.3s; }
+  #spotifyLogin { background-color: #1DB954; color: white; }
+  #fetchApple { background-color: #ff2d55; color: white; }
+  #transfer { background-color: #fff; color: #000; }
+  #log { white-space: pre-wrap; background-color: #000; color: #32ff7e; padding: 20px; border: 1px solid #1DB954; border-radius: 12px; font-family: monospace; font-size: 13px; height: 500px; overflow-y: auto; }
+  .artist-name { color: #1DB954; font-weight: bold; }
+  .error-name { color: #ff2d55; }
+</style>
+</head>
+<body>
+<h1>Miley Cyrus Approved 🛡️✨</h1>
+<input type="text" id="spotifyPlaylistName" placeholder="Miley > Diddy Anthems 💖">
+<div class="controls">
+    <button id="spotifyLogin">1. Login</button>
+    <button id="fetchApple">2. Paste JSON</button>
+    <button id="transfer" disabled>3. Secure Transfer 🚀</button>
+</div>
+<pre id="log">Waiting for bops... No Diddys allowed. 🙅‍♂️</pre>
+
+<script>
+const CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
+const REDIRECT = "https://rosics-code.github.io/apple2spotify/index.html";
+let token = localStorage.getItem("spotify_access_token"), userId = null, appleTracks = [];
+
+const log = msg => { const l = document.getElementById("log"); l.innerHTML += msg + "\n"; l.scrollTop = l.scrollHeight; };
+const clean = (n) => n.split(' (')[0].split(' [')[0].split(' - ')[0].replace(/feat\..*/gi,'').replace(/ft\..*/gi,'').trim();
+
+document.getElementById("spotifyLogin").onclick = () => {
+    window.location.href = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&response_type=token&scope=playlist-modify-private playlist-modify-public&redirect_uri=${encodeURIComponent(REDIRECT)}`;
+};
+
+document.getElementById("fetchApple").onclick = () => {
+    const raw = prompt("Paste the JSON:");
+    if(!raw) return;
+    const data = JSON.parse(raw);
+    const found = [];
+    const search = (obj) => {
+        if(!obj || typeof obj !== 'object') return;
+        if((obj.type === 'songs' || obj.type === 'library-songs') && obj.attributes?.name) {
+            found.push({ name: obj.attributes.name, artist: obj.attributes.artistName });
+        }
+        Object.values(obj).forEach(v => search(v));
+    };
+    search(data);
+    appleTracks = Array.from(new Set(found.map(a => JSON.stringify(a)))).map(a => JSON.parse(a));
+    log(`🔎 Loaded ${appleTracks.length} tracks.`);
+    document.getElementById("transfer").disabled = false;
+};
+
+async function secureSearch(name, artist) {
+    const cleanName = clean(name);
+    const query = encodeURIComponent(`track:${cleanName} artist:${artist}`);
+    const resp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=10`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await resp.json();
+    const items = data.tracks?.items || [];
+
+    if (items.length > 0) {
+        // FILTER: The artist MUST be in the result's artist list
+        const legitMatches = items.filter(i => 
+            i.artists.some(a => artist.toLowerCase().includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(artist.toLowerCase()))
+        );
+
+        if (legitMatches.length > 0) {
+            // Pick explicit if possible, otherwise first legit match
+            return legitMatches.find(i => i.explicit) || legitMatches[0];
+        }
+    }
+    
+    // BACKUP: If strict failed, try fuzzy but STILL filter by artist
+    const fuzzyResp = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(cleanName + " " + artist)}&type=track&limit=10`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    const fuzzyData = await fuzzyResp.json();
+    const fuzzyItems = fuzzyData.tracks?.items || [];
+    
+    return fuzzyItems.find(i => 
+        i.artists.some(a => artist.toLowerCase().includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(artist.toLowerCase()))
+    ) || null;
+}
+
+document.getElementById("transfer").onclick = async () => {
+    log(`🚀 <b>STARTING SECURE TRANSFER...</b>`);
+    const pName = document.getElementById("spotifyPlaylistName").value || "Safe Anthems";
+    const pResp = await fetch(`https://api.spotify.com/v1/users/${userId}/playlists`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: pName, public: false })
+    });
+    const playlist = await pResp.json();
+
+    const uris = [];
+    // Process in smaller batches for better tracking
+    for (let i = 0; i < appleTracks.length; i += 10) {
+        const chunk = appleTracks.slice(i, i + 10);
+        const results = await Promise.all(chunk.map(t => secureSearch(t.name, t.artist)));
+        
+        results.forEach((match, index) => {
+            const original = chunk[index];
+            if (match) {
+                uris.push(match.uri);
+                log(`${match.explicit ? '🔥' : '✅'} ${match.name} — <span class="artist-name">${match.artists[0].name}</span>`);
+            } else {
+                log(`<span class="error-name">❌ REJECTED/MISSING: ${original.name} by ${original.artist}</span>`);
+            }
+        });
+    }
+
+    for (let i = 0; i < uris.length; i += 100) {
+        await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
+            method: "POST", headers: { Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+        });
+    }
+    log(`\n🎉 <b>FINISHED!</b> ${uris.length} tracks are safe in '${pName}'!`);
+};
+
+window.onload = async () => {
+    const hash = window.location.hash.substring(1).split('&').reduce((a, b) => { const [k, v] = b.split('='); a[k] = v; return a; }, {});
+    if (hash.access_token) { token = hash.access_token; localStorage.setItem("spotify_access_token", token); window.location.hash = ""; }
+    if (token) {
+        const uResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: `Bearer ${token}` } });
+        const uData = await uResp.json();
+        userId = uData.id;
+        log(`🛡️ <b>Security Enabled</b> for user: <span class="artist-name">${uData.display_name}</span>`);
         document.getElementById("transfer").disabled = false;
     }
 };
