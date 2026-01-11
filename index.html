@@ -2,41 +2,35 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Apple2Spotify (ULTRA-VACUUM 👑)</title>
+<title>Apple2Spotify</title>
 <style>
-  body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; background-color: #f4f4f4; }
-  h1 { text-align: center; color: #ff2d55; text-transform: uppercase; letter-spacing: 1px; }
-  .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-  input[type=text] { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
-  button { padding: 12px 24px; margin: 5px 0; background-color: #ff2d55; color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.2s; }
-  button:hover { transform: scale(1.02); filter: brightness(1.1); }
-  button:disabled { background-color: #ccc; cursor: not-allowed; transform: none; }
-  #spotifyLogin { background-color: #1DB954; }
-  #trackList { max-height: 350px; overflow-y: auto; border: 1px solid #eee; padding: 15px; margin-top: 15px; border-radius: 8px; background-color: #fafafa; }
-  .track { display: flex; align-items: center; margin-bottom: 8px; font-size: 14px; gap: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
-  .thumb { width: 35px; height: 35px; border-radius: 4px; object-fit: cover; }
-  #log { white-space: pre-wrap; word-break: break-all; background-color: #111; color: #32ff7e; padding: 15px; border-radius: 8px; margin-top: 15px; font-family: 'Consolas', monospace; height: 300px; overflow-y: auto; font-size: 12px; }
-  .artist-name { color: #ff2d55; font-weight: bold; }
+  body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+  h1 { text-align: center; }
+  input[type=text] { width: 100%; padding: 8px; margin: 5px 0; }
+  button { padding: 10px 15px; margin: 5px 0; background-color: #ff2d55; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
+  button:hover { background-color: #d82447; }
+  #trackList { max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-top: 10px; border-radius: 4px; background-color: #f7f7f7; }
+  .track { display: flex; align-items: center; margin-bottom: 5px; }
+  .track label { flex: 1; cursor: pointer; }
+  #log { white-space: pre-wrap; word-break: break-all; background-color: #eee; padding: 10px; border-radius: 4px; margin-top: 15px; }
 </style>
 </head>
 <body>
-<div class="card">
-    <h1>Apple → Spotify (ULTRA-VACUUM) 👑</h1>
-    <p style="text-align:center; color: #666;">Paste JSON pages one by one to keep adding to the vacuum! 🌪️</p>
+<h1>Apple Music → Spotify Transfer (ULTRA-VACUUM 👑 2.1)</h1>
 
-    <label>Spotify Playlist Name:
-        <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Bops 💖">
-    </label>
+<p><strong>✨ THE UPGRADE:</strong> Now cleaning track names to fix <em>(feat.)</em> and explicit tag issues. Paste your JSON and let's get it! 💅</p>
 
-    <div style="text-align:center; display: flex; gap: 10px; justify-content: center;">
-        <button id="spotifyLogin">Login to Spotify</button>
-        <button id="fetchApple">1. PASTE JSON & VACUUM</button>
-        <button id="transfer" disabled>2. Start Transfer 🚀</button>
-    </div>
+<label>
+  Spotify Playlist Name:
+  <input type="text" id="spotifyPlaylistName" placeholder="My Transferred Playlist">
+</label>
 
-    <div id="trackList">Your bops will appear here...</div>
-    <pre id="log">Status: Waiting for data, johnball589... ✨</pre>
-</div>
+<button id="spotifyLogin">Login to Spotify</button>
+<button id="fetchApple">1. PASTE JSON & PARSE ALL</button>
+<button id="transfer" disabled>2. Transfer Selected Tracks</button>
+
+<div id="trackList"></div>
+<pre id="log">Status updates will appear here...</pre>
 
 <script>
 const SPOTIFY_CLIENT_ID = "52dbb7368d80433194dc029bf4f71137";
@@ -45,152 +39,222 @@ let spotifyToken = localStorage.getItem("spotify_access_token");
 let spotifyUserId = null;
 let appleTracks = [];
 
-const log = msg => {
-    const l = document.getElementById("log");
-    l.innerHTML += msg + "\n";
-    l.scrollTop = l.scrollHeight;
+const log = msg => document.getElementById("log").textContent += msg + "\n";
+const clearLog = () => document.getElementById("log").textContent = "";
+
+const updateLoginUI = (isLoggedIn, userName) => {
+    const loginButton = document.getElementById("spotifyLogin");
+    if (isLoggedIn) {
+        loginButton.style.display = 'none';
+        log(`✅ Spotify logged in as: ${userName || 'User'}`);
+        document.getElementById("transfer").disabled = false;
+    } else {
+        loginButton.style.display = 'block';
+        document.getElementById("transfer").disabled = true;
+    }
 };
 
-const clean = (n) => n.split(' (')[0].split(' [')[0].split(' - ')[0].replace(/feat\..*/gi,'').replace(/ft\..*/gi,'').trim();
-
-// FIXED LOGIN: Using Implicit Grant (response_type=token)
-document.getElementById("spotifyLogin").onclick = () => {
-    const scopes = encodeURIComponent("playlist-modify-private playlist-modify-public user-read-private");
-    window.location.href = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&scope=${scopes}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
-};
-
-// SMART SEARCH: Artist-Check Logic
-async function findSong(name, artist) {
-    const cleanName = clean(name);
-    const q = encodeURIComponent(`track:${cleanName} artist:${artist}`);
-    try {
-        const r = await fetch(`https://api.spotify.com/v1/search?q=${q}&type=track&limit=5`, {
-            headers: { Authorization: `Bearer ${spotifyToken}` }
-        });
-        const d = await r.json();
-        const results = d.tracks?.items || [];
-        
-        // Find result where the artist name actually matches
-        return results.find(s => s.artists.some(a => 
-            artist.toLowerCase().includes(a.name.toLowerCase()) || 
-            a.name.toLowerCase().includes(artist.toLowerCase())
-        )) || results[0] || null;
-    } catch(e) { return null; }
+function base64urlencode(buffer) {
+  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
+  return btoa(String.fromCharCode.apply(null, bytes))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// ULTRA-VACUUM: Aggressive multi-page parser
-const vacuumParser = (raw) => {
-    try {
-        const data = JSON.parse(raw);
-        const existing = new Set(appleTracks.map(t => `${t.name}|${t.artist}`));
-        let count = 0;
+async function sha256(buffer) {
+  return await crypto.subtle.digest("SHA-256", new TextEncoder().encode(buffer));
+}
 
-        const findItems = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (Array.isArray(obj)) { obj.forEach(findItems); return; }
+async function generatePKCE() {
+  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(64))) 
+    .map(c => ('00' + c.toString(16)).slice(-2)).join("");
+  const challenge = base64urlencode(await sha256(verifier));
+  return { verifier, challenge };
+}
 
-            if ((obj.type === 'songs' || obj.type === 'library-songs') && obj.attributes?.name) {
-                const name = obj.attributes.name;
-                const artist = obj.attributes.artistName || "Unknown Artist";
-                const img = obj.attributes.artwork?.url ? obj.attributes.artwork.url.replace('{w}x{h}', '100x100') : '';
-                const key = `${name}|${artist}`;
-                
-                if (!existing.has(key)) {
-                    appleTracks.push({ name, artist, img });
-                    existing.add(key);
-                    count++;
-                }
+document.getElementById("spotifyLogin").onclick = async () => {
+  const { verifier, challenge } = await generatePKCE();
+  sessionStorage.setItem("pkce_verifier", verifier);
+  const scopes = "playlist-modify-private playlist-modify-public user-read-private"; 
+  const authUrl = new URL("https://accounts.spotify.com/authorize"); 
+  authUrl.searchParams.append('response_type', 'code');
+  authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
+  authUrl.searchParams.append('scope', scopes);
+  authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
+  authUrl.searchParams.append('code_challenge_method', 'S256');
+  authUrl.searchParams.append('code_challenge', challenge);
+  window.location.href = authUrl.toString();
+};
+
+async function exchangeCodeForToken(code) {
+  const verifier = sessionStorage.getItem("pkce_verifier");
+  const body = new URLSearchParams({
+    client_id: SPOTIFY_CLIENT_ID,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: verifier
+  });
+
+  try {
+    const resp = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString()
+    });
+    const data = await resp.json();
+    spotifyToken = data.access_token;
+    if (spotifyToken) {
+        localStorage.setItem("spotify_access_token", spotifyToken);
+        const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
+        const userData = await userResp.json();
+        spotifyUserId = userData.id;
+        updateLoginUI(true, userData.display_name || spotifyUserId);
+    }
+  } catch (e) { log(`❌ Token Exchange Error: ${e.message}`); }
+}
+
+async function checkStoredToken() {
+    if (spotifyToken) {
+        try {
+            const userResp = await fetch("https://api.spotify.com/v1/me", { headers: { Authorization: "Bearer " + spotifyToken } });
+            if (userResp.ok) {
+                const userData = await userResp.json();
+                spotifyUserId = userData.id;
+                updateLoginUI(true, userData.display_name || spotifyUserId);
+                return;
             }
-            for (let k in obj) { if (typeof obj[k] === 'object') findItems(obj[k]); }
+        } catch (e) { localStorage.removeItem("spotify_access_token"); }
+    }
+    updateLoginUI(false);
+}
+
+window.onload = () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get("code");
+  if (code) {
+    window.history.replaceState({}, document.title, REDIRECT_URI);
+    exchangeCodeForToken(code);
+  } else { checkStoredToken(); }
+};
+
+const parseAppleJson = (rawJsonString) => {
+    if (appleTracks.length === 0) clearLog();
+    log("Processing JSON data...");
+    try {
+        let jsonData = JSON.parse(rawJsonString);
+        const allArtists = {};
+        const allSongs = {};
+        const trackReferences = [];
+        const existingTrackMap = new Set(appleTracks.map(t => `${t.name}|${t.artist}`));
+
+        const aggressiveSearch = (data) => {
+            if (!data || typeof data !== 'object') return;
+            if (Array.isArray(data)) { data.forEach(item => aggressiveSearch(item)); return; }
+
+            if (data.type === 'artists' && data.attributes?.name) {
+                allArtists[data.id] = data.attributes.name;
+            } else if ((data.type === 'songs' || data.type === 'music-videos' || data.type === 'library-songs') && data.attributes?.name) {
+                allSongs[data.id] = {
+                    name: data.attributes.name,
+                    artistNameDirect: data.attributes.artistName || null,
+                    artistData: data.relationships?.artists?.data || null
+                };
+            }
+            if ((data.type?.includes('song') || data.type === 'music-videos') && data.id) {
+                 if (!trackReferences.find(r => r.id === data.id)) trackReferences.push({id: data.id, type: data.type});
+            }
+            for (const key in data) { if (typeof data[key] === 'object') aggressiveSearch(data[key]); }
         };
 
-        findItems(data);
-        log(`✅ Vacuumed ${count} new tracks! Total unique: ${appleTracks.length}`);
-        
-        const list = document.getElementById("trackList");
-        list.innerHTML = appleTracks.map((t, i) => `
-            <div class="track">
-                <input type="checkbox" id="t${i}" checked>
-                ${t.img ? `<img src="${t.img}" class="thumb">` : ''}
-                <label for="t${i}">${t.name} — <span class="artist-name">${t.artist}</span></label>
-            </div>
-        `).join('');
+        aggressiveSearch(jsonData);
+        let newTracks = [];
+        trackReferences.forEach(trackRef => {
+            const songData = allSongs[trackRef.id] || (jsonData.resources?.['library-songs']?.[trackRef.id]);
+            if (songData) {
+                let name = songData.attributes ? songData.attributes.name : songData.name;
+                let artist = songData.attributes ? songData.attributes.artistName : (songData.artistNameDirect || 'Unknown Artist');
+                
+                const uniqueKey = `${name}|${artist}`;
+                if (name && !existingTrackMap.has(uniqueKey)) {
+                    newTracks.push({name, artist});
+                    existingTrackMap.add(uniqueKey);
+                }
+            }
+        });
 
-        if(spotifyToken) document.getElementById("transfer").disabled = false;
-    } catch(e) { log("❌ Oops! That JSON looks messy. Make sure you copied everything!"); }
+        appleTracks = appleTracks.concat(newTracks);
+        log(`\n✅ Added ${newTracks.length} tracks. Total: ${appleTracks.length}.`);
+        
+        const trackListDiv = document.getElementById("trackList");
+        trackListDiv.innerHTML = "";
+        appleTracks.forEach((t, i) => {
+            const div = document.createElement("div");
+            div.className = "track";
+            div.innerHTML = `<input type="checkbox" id="track${i}" checked><label for="track${i}">${t.name} — ${t.artist}</label>`;
+            trackListDiv.appendChild(div);
+        });
+        return true; 
+    } catch(e) { log(`❌ Parsing error: ${e.message}`); return false; }
 };
 
 document.getElementById("fetchApple").onclick = () => {
-    const raw = prompt("PASTE THE JSON CONTENT HERE:");
-    if(raw) vacuumParser(raw);
+    const rawJsonString = prompt("PASTE JSON HERE:");
+    if (rawJsonString) parseAppleJson(rawJsonString);
+};
+
+// THE MAGIC FIX FOR FEAT. AND EXPLICIT SONGS
+const cleanTrackName = (name) => {
+  return name
+    .replace(/\(feat\..*?\)/gi, '') // Remove (feat. ...)
+    .replace(/\[feat\..*?\]/gi, '') // Remove [feat. ...]
+    .replace(/- feat\..*/gi, '')    // Remove - feat...
+    .replace(/\(Explicit\)/gi, '')  // Remove Apple's explicit tag if it leaked
+    .replace(/\[Explicit\]/gi, '')  // Remove explicit brackets
+    .trim();
 };
 
 document.getElementById("transfer").onclick = async () => {
-    const pName = document.getElementById("spotifyPlaylistName").value || "Vacuumed Anthems 🌪️";
-    document.getElementById("transfer").disabled = true;
-    log(`\n🚀 Processing ${appleTracks.length} tracks...`);
+  if (!spotifyToken || !spotifyUserId) return;
+  const selectedTracks = appleTracks.filter((t, i) => document.getElementById(`track${i}`).checked);
+  const playlistName = document.getElementById("spotifyPlaylistName").value.trim() || "Apple Music Transfer";
 
-    const pResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
-        method: "POST", headers: { Authorization: `Bearer ${spotifyToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: pName, public: false })
+  try {
+    log(`\nStarting transfer for ${selectedTracks.length} tracks...`);
+    const createResp = await fetch(`https://api.spotify.com/v1/users/${spotifyUserId}/playlists`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: playlistName, public: false })
     });
-    const playlist = await pResp.json();
+    const newPlaylist = await createResp.json();
 
     const uris = [];
-    const selected = appleTracks.filter((t, i) => document.getElementById(`t${i}`).checked);
-
-    for (let i = 0; i < selected.length; i += 20) {
-        const chunk = selected.slice(i, i + 20);
-        const matches = await Promise.all(chunk.map(t => findSong(t.name, t.artist)));
-        
-        matches.forEach((m, idx) => {
-            if (m) {
-                uris.push(m.uri);
-                log(`✅ Found: ${m.name}`);
-            } else {
-                log(`❌ Missing: ${chunk[idx].name}`);
-            }
-        });
+    for (const t of selectedTracks) {
+      const cleanName = cleanTrackName(t.name);
+      // We search by name and artist but keep it slightly broad to catch explicit versions
+      const query = encodeURIComponent(`track:${cleanName} artist:${t.artist}`);
+      const searchResp = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=5`, { 
+          headers: { Authorization: "Bearer " + spotifyToken } 
+      });
+      const data = await searchResp.json();
+      
+      if (data.tracks?.items?.length) {
+        // Try to find the explicit one first if it exists, otherwise take the first match
+        const bestMatch = data.tracks.items.find(item => item.explicit) || data.tracks.items[0];
+        uris.push(bestMatch.uri);
+      } else {
+        log(`❌ Not found: ${t.name} by ${t.artist}`);
+      }
     }
 
     for (let i = 0; i < uris.length; i += 100) {
-        await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
-            method: "POST", headers: { Authorization: `Bearer ${spotifyToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uris: uris.slice(i, i + 100) })
-        });
+      await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${spotifyToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+      });
     }
-    log(`\n🎉 DONE! Check your Spotify for '${pName}'!`);
-};
-
-window.onload = async () => {
-    const hash = window.location.hash.substring(1).split('&').reduce((a, b) => { 
-        const [k, v] = b.split('='); a[k] = v; return a; 
-    }, {});
-    
-    if (hash.access_token) {
-        spotifyToken = hash.access_token;
-        localStorage.setItem("spotify_access_token", spotifyToken);
-        window.location.hash = ""; // Clean URL
-    }
-    
-    if (spotifyToken) {
-        try {
-            const resp = await fetch("https://api.spotify.com/v1/me", { 
-                headers: { Authorization: `Bearer ${spotifyToken}` } 
-            });
-            const user = await resp.json();
-            if (user.id) {
-                spotifyUserId = user.id;
-                document.getElementById("spotifyLogin").style.display = "none";
-                log(`✅ Logged in as: ${user.display_name}`);
-            } else {
-                throw new Error();
-            }
-        } catch(e) { 
-            localStorage.removeItem("spotify_access_token");
-            spotifyToken = null;
-        }
-    }
+    log(`\n🎉 Done! Added ${uris.length} tracks to ${newPlaylist.name}. Go check YouAreCuteVille's finest playlist!`);
+  } catch (e) { log("❌ Error: " + e.message); }
 };
 </script>
 </body>
